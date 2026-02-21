@@ -443,6 +443,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   .price-row{grid-template-columns:1fr}
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="orb orb1"></div>
@@ -488,8 +489,18 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   </div>
 </div>
 
+<!-- AUTH SCREEN -->
+<div id="auth-screen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px;">
+  <h2>World IQ Login</h2>
+  <input type="text" id="username" placeholder="Username" />
+  <input type="email" id="email" placeholder="Email" />
+  <input type="password" id="password" placeholder="Password" />
+  <button onclick="signup()">Sign Up</button>
+  <button onclick="login()">Login</button>
+</div>
+
 <!-- HOME SCREEN -->
-<div id="homescreen">
+<div id="homescreen" style="display:none;">
 
   <div class="home-hero">
     <div class="home-greeting" id="home-greeting">Good morning</div>
@@ -642,9 +653,19 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     </div>
 
   </div>
-</div>
+  </div>
 
-<script>
+  <script>
+    const SUPABASE_URL = "https://cnerthaoxsgawokaultj.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNuZXJ0aGFveHNnYXdva2F1bHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2ODI0MjEsImV4cCI6MjA4NzI1ODQyMX0.j59L0Q7j-nbIQSY_NS4c2_cqoB0lrNJkzbjvWIHhlPg";
+
+    const supabaseClient = supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY
+    );
+  </script>
+
+  <script>
 // ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
@@ -1437,6 +1458,77 @@ setInterval(updateClock,1000); updateClock();
 updateXPBar();
 updateQuest();
 window.addEventListener('resize',()=>{if(document.getElementById('priceChart'))drawChart();});
+
+async function signup() {
+  const username = document.getElementById("username").value;
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+
+  const { data, error } = await supabaseClient.auth.signUp({
+    email,
+    password,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  const user = data.user;
+
+  await supabaseClient.from("profiles").insert({
+    user_id: user.id,
+    username: username,
+  });
+
+  alert("Account created! Please login.");
+}
+
+async function login() {
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  initApp();
+}
+
+async function initApp() {
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("homescreen").style.display = "block";
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+
+  const { data } = await supabaseClient
+    .from("profiles")
+    .select("*")
+    .eq("user_id", user.id)
+    .single();
+
+  if (data) {
+    S.xp = data.xp;
+    S.level = data.level;
+    S.streak = data.streak;
+    S.totalCorrect = data.total_correct;
+  }
+
+  updateUI();
+}
+
+supabaseClient.auth.getSession().then(({ data }) => {
+  if (data.session) {
+    initApp();
+  }
+});
+
 </script>
 </body>
 </html>
