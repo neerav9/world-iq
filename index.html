@@ -490,13 +490,101 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 </div>
 
 <!-- AUTH SCREEN -->
-<div id="auth-screen" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:12px;">
-  <h2>World IQ Login</h2>
-  <input type="text" id="username" placeholder="Username" />
-  <input type="email" id="email" placeholder="Email" />
-  <input type="password" id="password" placeholder="Password" />
-  <button onclick="signup()">Sign Up</button>
-  <button onclick="login()">Login</button>
+<div id="auth-screen" style="display:flex;align-items:center;justify-content:center;height:100vh;padding:20px;">
+  <div style="
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px 32px;
+    width: 100%;
+    max-width: 380px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  ">
+    <div style="
+      font-family: var(--ffh);
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: 0.06em;
+    ">
+      WORLD IQ
+    </div>
+
+    <div style="
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 28px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    ">
+      Login to continue
+    </div>
+
+    <input type="text" id="username" placeholder="Username" style="
+      width:100%;
+      padding:12px;
+      margin-bottom:12px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background: var(--card2);
+      color: var(--text);
+      font-family: var(--ff);
+    ">
+
+    <input type="email" id="email" placeholder="Email" style="
+      width:100%;
+      padding:12px;
+      margin-bottom:12px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background: var(--card2);
+      color: var(--text);
+      font-family: var(--ff);
+    ">
+
+    <input type="password" id="password" placeholder="Password" style="
+      width:100%;
+      padding:12px;
+      margin-bottom:20px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background: var(--card2);
+      color: var(--text);
+      font-family: var(--ff);
+    ">
+
+    <button onclick="signup()" style="
+      width:100%;
+      padding:12px;
+      margin-bottom:10px;
+      border-radius:12px;
+      border:1px solid rgba(168,85,247,0.4);
+      background: linear-gradient(135deg,var(--xp),var(--xp2));
+      color:white;
+      font-family: var(--ffm);
+      font-size:11px;
+      letter-spacing:0.1em;
+      cursor:pointer;
+    ">
+      CREATE ACCOUNT
+    </button>
+
+    <button onclick="login()" style="
+      width:100%;
+      padding:12px;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background: var(--card2);
+      color: var(--text);
+      font-family: var(--ffm);
+      font-size:11px;
+      letter-spacing:0.1em;
+      cursor:pointer;
+    ">
+      LOGIN
+    </button>
+  </div>
 </div>
 
 <!-- HOME SCREEN -->
