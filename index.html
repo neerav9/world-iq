@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>WORLD IQ — Gamified Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#07090f;--surface:#0c0f1a;--card:#111626;--card2:#161c2e;--border:rgba(255,255,255,0.07);
+  --text:#eef0f8;--muted:#3d4a65;--dim:#1a2035;
+  --xp:#7c3aed;--xp2:#a855f7;
+  --gold:#f5c842;--gold2:#e8a020;--goldfaint:rgba(245,200,66,0.08);
+  --silver:#c8d8ee;--silverfaint:rgba(200,216,238,0.07);
+  --green:#00e676;--red:#ff4560;--blue:#00bfff;--orange:#ff8c42;
+  --ff:\'Nunito\',sans-serif;--ffm:\'JetBrains Mono\',monospace;--ffh:\'Rajdhani\',sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--ff);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
+
+/* ── AMBIENT ── */
+.orb{position:fixed;border-radius:50%;filter:blur(100px);pointer-events:none;z-index:0}
+.orb1{width:500px;height:500px;top:-150px;left:-150px;background:rgba(124,58,237,0.06)}
+.orb2{width:400px;height:400px;bottom:-100px;right:-100px;background:rgba(245,200,66,0.04)}
+
+/* ── TOPBAR ── */
+#topbar{
+  position:sticky;top:0;z-index:200;
+  background:rgba(7,9,15,0.94);backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;height:56px;flex-shrink:0;
+}
+.tb-logo{font-family:var(--ffh);font-size:22px;font-weight:700;letter-spacing:0.06em;
+  background:linear-gradient(135deg,#7c3aed,#a855f7,#00bfff);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.tb-mid{display:flex;align-items:center;gap:10px}
+
+/* XP BAR */
+.xp-wrap{display:flex;align-items:center;gap:8px}
+.xp-label{font-family:var(--ffm);font-size:10px;color:var(--muted);letter-spacing:0.1em}
+.xp-bar{width:80px;height:6px;background:var(--dim);border-radius:3px;overflow:hidden}
+.xp-fill{height:100%;background:linear-gradient(90deg,var(--xp),var(--xp2));border-radius:3px;transition:width 0.8s ease}
+.xp-val{font-family:var(--ffm);font-size:11px;color:var(--xp2);font-weight:700}
+
+.level-badge{
+  display:flex;align-items:center;gap:6px;
+  background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.25);
+  border-radius:20px;padding:4px 12px;cursor:pointer;transition:all 0.2s;
+}
+.level-badge:hover{background:rgba(124,58,237,0.2)}
+.lv-icon{font-size:15px}
+.lv-num{font-family:var(--ffm);font-size:12px;font-weight:700;color:var(--xp2)}
+.lv-label{font-size:10px;color:var(--muted)}
+
+.streak-badge{
+  display:flex;align-items:center;gap:5px;
+  background:rgba(245,200,66,0.08);border:1px solid rgba(245,200,66,0.2);
+  border-radius:20px;padding:4px 10px;cursor:pointer;
+}
+.str-fire{font-size:14px}
+.str-num{font-family:var(--ffm);font-size:12px;font-weight:700;color:var(--gold)}
+
+#topbar-clock{font-family:var(--ffm);font-size:11px;color:var(--muted)}
+
+/* ── HOME SCREEN ── */
+#homescreen{position:relative;z-index:1;min-height:calc(100vh - 56px);padding:24px 18px 40px}
+
+.home-hero{text-align:center;padding:32px 0 40px}
+.home-greeting{font-size:14px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;font-family:var(--ffm)}
+.home-title{font-family:var(--ffh);font-size:clamp(32px,8vw,52px);font-weight:700;letter-spacing:0.04em;line-height:1.1;margin-bottom:10px}
+.home-title span{background:linear-gradient(135deg,var(--gold),var(--xp2),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.home-sub{font-size:14px;color:var(--muted);max-width:400px;margin:0 auto}
+
+/* DAILY QUEST BAR */
+.quest-bar{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:14px;padding:16px 18px;margin-bottom:28px;
+  display:flex;align-items:center;gap:14px;
+}
+.quest-icon{font-size:26px;flex-shrink:0}
+.quest-content{flex:1}
+.quest-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.quest-sub{font-size:11px;color:var(--muted)}
+.quest-progress-wrap{margin-top:8px;display:flex;align-items:center;gap:8px}
+.quest-prog-bar{flex:1;height:4px;background:var(--dim);border-radius:2px;overflow:hidden}
+.quest-prog-fill{height:100%;background:linear-gradient(90deg,var(--gold),var(--xp2));border-radius:2px;transition:width 0.8s ease}
+.quest-pct{font-family:var(--ffm);font-size:10px;color:var(--gold)}
+.quest-reward{font-family:var(--ffm);font-size:11px;color:var(--xp2);background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.2);border-radius:8px;padding:4px 10px;flex-shrink:0}
+
+/* ARENA GRID */
+.arenas-label{font-family:var(--ffm);font-size:10px;letter-spacing:0.2em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.arenas-label::before{content:'';width:20px;height:1px;background:var(--xp2)}
+.arenas-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:32px}
+@media(min-width:600px){.arenas-grid{grid-template-columns:repeat(3,1fr)}}
+
+.arena-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:18px;padding:20px 16px;cursor:pointer;
+  transition:all 0.3s;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;gap:8px;
+  animation:cardIn 0.5s ease both;
+}
+.arena-card:nth-child(1){animation-delay:0.05s}
+.arena-card:nth-child(2){animation-delay:0.1s}
+.arena-card:nth-child(3){animation-delay:0.15s}
+.arena-card:nth-child(4){animation-delay:0.2s}
+.arena-card:nth-child(5){animation-delay:0.25s}
+.arena-card:nth-child(6){animation-delay:0.3s}
+@keyframes cardIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+
+.arena-card::before{content:'';position:absolute;inset:0;opacity:0;transition:opacity 0.3s}
+.arena-card:hover{transform:translateY(-3px);box-shadow:0 16px 40px rgba(0,0,0,0.4)}
+.arena-card:hover::before{opacity:1}
+.arena-card:active{transform:scale(0.97)}
+
+.arena-emoji{font-size:32px;line-height:1;margin-bottom:2px}
+.arena-name{font-family:var(--ffh);font-size:17px;font-weight:700;letter-spacing:0.04em}
+.arena-sub{font-size:11px;color:var(--muted);line-height:1.4}
+
+.arena-footer{display:flex;align-items:center;justify-content:space-between;margin-top:4px}
+.arena-xp-badge{font-family:var(--ffm);font-size:9px;letter-spacing:0.1em;padding:2px 8px;border-radius:4px;border:1px solid}
+.arena-streak{font-size:10px;color:var(--muted)}
+
+/* arena colors */
+.arena-gold{border-color:rgba(245,200,66,0.2)}
+.arena-gold::before{background:radial-gradient(ellipse at 80% 20%,rgba(245,200,66,0.08),transparent 60%)}
+.arena-gold .arena-xp-badge{color:var(--gold);border-color:rgba(245,200,66,0.3);background:rgba(245,200,66,0.05)}
+
+.arena-india{border-color:rgba(255,140,66,0.2)}
+.arena-india::before{background:radial-gradient(ellipse at 80% 20%,rgba(255,140,66,0.08),transparent 60%)}
+.arena-india .arena-xp-badge{color:var(--orange);border-color:rgba(255,140,66,0.3);background:rgba(255,140,66,0.05)}
+
+.arena-world{border-color:rgba(0,230,118,0.2)}
+.arena-world::before{background:radial-gradient(ellipse at 80% 20%,rgba(0,230,118,0.07),transparent 60%)}
+.arena-world .arena-xp-badge{color:var(--green);border-color:rgba(0,230,118,0.3);background:rgba(0,230,118,0.05)}
+
+.arena-tech{border-color:rgba(168,85,247,0.2)}
+.arena-tech::before{background:radial-gradient(ellipse at 80% 20%,rgba(168,85,247,0.08),transparent 60%)}
+.arena-tech .arena-xp-badge{color:var(--xp2);border-color:rgba(168,85,247,0.3);background:rgba(168,85,247,0.05)}
+
+.arena-markets{border-color:rgba(0,191,255,0.2)}
+.arena-markets::before{background:radial-gradient(ellipse at 80% 20%,rgba(0,191,255,0.07),transparent 60%)}
+.arena-markets .arena-xp-badge{color:var(--blue);border-color:rgba(0,191,255,0.3);background:rgba(0,191,255,0.05)}
+
+.arena-science{border-color:rgba(255,69,96,0.2)}
+.arena-science::before{background:radial-gradient(ellipse at 80% 20%,rgba(255,69,96,0.06),transparent 60%)}
+.arena-science .arena-xp-badge{color:var(--red);border-color:rgba(255,69,96,0.3);background:rgba(255,69,96,0.05)}
+
+/* ACHIEVEMENTS */
+.achieve-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none;margin-bottom:32px}
+.achieve-row::-webkit-scrollbar{display:none}
+.achieve{
+  flex-shrink:0;width:72px;text-align:center;
+  background:var(--card);border:1px solid var(--border);border-radius:14px;padding:10px 6px;
+  transition:all 0.2s;cursor:pointer;
+}
+.achieve:hover{transform:scale(1.05)}
+.achieve.locked{opacity:0.35;filter:grayscale(1)}
+.achieve-icon{font-size:26px;margin-bottom:4px}
+.achieve-name{font-size:9px;color:var(--muted);line-height:1.3}
+
+/* ── ARENA SCREEN ── */
+#arenascreen{position:relative;z-index:1;display:none;min-height:calc(100vh - 56px)}
+
+.arena-topbar{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 18px;border-bottom:1px solid var(--border);
+  background:rgba(7,9,15,0.8);backdrop-filter:blur(12px);
+  position:sticky;top:56px;z-index:100;
+}
+.back-btn{
+  width:36px;height:36px;border-radius:10px;border:1px solid var(--border);
+  background:none;color:var(--text);font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:all 0.2s;
+}
+.back-btn:hover{background:var(--dim);border-color:rgba(255,255,255,0.15)}
+.arena-top-info{flex:1}
+.arena-top-name{font-family:var(--ffh);font-size:20px;font-weight:700;letter-spacing:0.04em}
+.arena-top-sub{font-size:11px;color:var(--muted)}
+.arena-top-xp{font-family:var(--ffm);font-size:11px;color:var(--xp2)}
+
+/* INNER TABS */
+.inner-tabs{
+  display:flex;background:var(--surface);
+  border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none;
+}
+.inner-tabs::-webkit-scrollbar{display:none}
+.itab{
+  flex-shrink:0;padding:11px 18px;border:none;background:none;
+  color:var(--muted);font-family:var(--ff);font-size:12px;font-weight:700;
+  letter-spacing:0.06em;text-transform:uppercase;cursor:pointer;
+  border-bottom:2px solid transparent;transition:all 0.25s;white-space:nowrap;
+}
+.itab:hover{color:var(--text)}
+.itab.active{color:var(--text);border-bottom-color:var(--xp2)}
+
+.arena-content{padding:20px 18px 60px;max-width:860px;margin:0 auto}
+
+.ipanel{display:none;animation:fadeSlide 0.3s ease}
+.ipanel.active{display:block}
+@keyframes fadeSlide{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── CARDS ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px;position:relative;overflow:hidden}
+.card-accent{position:absolute;top:0;left:0;right:0;height:2px}
+.card-label{font-family:var(--ffm);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card-label::before{content:'';width:16px;height:1px;background:currentColor}
+
+/* PRICE CARDS */
+.price-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.price-card{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:14px;padding:16px;position:relative;overflow:hidden;
+  cursor:pointer;transition:all 0.25s;
+}
+.price-card:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(0,0,0,0.3)}
+.price-card.gold-c{border-color:rgba(245,200,66,0.2)}
+.price-card.gold-c::before{content:'';position:absolute;top:-30px;right:-30px;width:100px;height:100px;background:radial-gradient(circle,rgba(245,200,66,0.15),transparent 70%);pointer-events:none}
+.price-card.silver-c{border-color:rgba(200,216,238,0.2)}
+.price-card.silver-c::before{content:'';position:absolute;top:-30px;right:-30px;width:100px;height:100px;background:radial-gradient(circle,rgba(200,216,238,0.1),transparent 70%);pointer-events:none}
+
+.pc-tag{font-family:var(--ffm);font-size:9px;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.pc-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.pc-price{font-family:var(--ffm);font-size:clamp(22px,5vw,32px);font-weight:700;color:var(--text);line-height:1;margin-bottom:4px}
+.pc-sub{font-size:11px;color:var(--muted)}
+.pc-change{font-family:var(--ffm);font-size:12px;margin-top:8px;display:flex;align-items:center;gap:5px}
+.up{color:var(--green)}.dn{color:var(--red)}
+.pc-intl{font-size:10px;color:var(--muted);margin-top:2px;font-family:var(--ffm)}
+
+/* CHART */
+.chart-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px}
+.chart-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px}
+.chart-title{font-family:var(--ffh);font-size:16px;font-weight:600;letter-spacing:0.06em}
+.range-btns{display:flex;gap:4px}
+.rb{font-family:var(--ffm);font-size:10px;letter-spacing:0.08em;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:none;color:var(--muted);cursor:pointer;transition:all 0.2s}
+.rb:hover,.rb.act{background:rgba(124,58,237,0.12);border-color:var(--xp2);color:var(--xp2)}
+#priceChart{width:100%;height:180px;display:block}
+.chart-legend{display:flex;gap:16px;margin-top:10px;flex-wrap:wrap}
+.cl-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+.cl-dot{width:8px;height:8px;border-radius:50%}
+
+/* WHY CARDS */
+.why-card{
+  background:var(--card2);border:1px solid var(--border);
+  border-radius:14px;overflow:hidden;margin-bottom:10px;cursor:pointer;
+  transition:border-color 0.2s;
+}
+.why-card:hover{border-color:rgba(255,255,255,0.12)}
+.why-front{padding:14px 16px;display:flex;align-items:center;gap:12px}
+.why-icon{font-size:26px;width:40px;text-align:center;flex-shrink:0}
+.why-mid{flex:1}
+.why-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.why-sub{font-size:11px;color:var(--muted)}
+.why-impact{font-family:var(--ffm);font-size:9px;letter-spacing:0.1em;padding:3px 9px;border-radius:10px;border:1px solid;flex-shrink:0}
+.imp-bull{color:var(--green);border-color:rgba(0,230,118,0.3);background:rgba(0,230,118,0.05)}
+.imp-bear{color:var(--red);border-color:rgba(255,69,96,0.3);background:rgba(255,69,96,0.05)}
+.imp-neut{color:var(--muted);border-color:var(--border)}
+.why-chevron{color:var(--muted);font-size:12px;margin-left:8px;transition:transform 0.3s;flex-shrink:0}
+.why-card.open .why-chevron{transform:rotate(180deg)}
+.why-body{
+  max-height:0;overflow:hidden;transition:max-height 0.4s ease,padding 0.3s;
+  font-size:13px;color:#6a7fa0;line-height:1.75;
+  border-top:0 solid var(--border);padding:0 16px;
+}
+.why-card.open .why-body{max-height:400px;padding:14px 16px;border-top-width:1px}
+.why-body strong{color:var(--text);font-weight:600}
+.why-body .tag{display:inline-block;font-family:var(--ffm);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;padding:1px 7px;border-radius:4px;margin-bottom:6px}
+
+/* FORECAST TIMELINE */
+.ft-wrap{position:relative;padding-left:28px}
+.ft-line-vert{position:absolute;left:10px;top:6px;bottom:6px;width:2px;background:linear-gradient(to bottom,var(--xp2),rgba(124,58,237,0.1))}
+.ft-item{position:relative;margin-bottom:22px}
+.ft-item:last-child{margin-bottom:0}
+.ft-dot{
+  position:absolute;left:-23px;top:3px;
+  width:14px;height:14px;border-radius:50%;
+  background:var(--bg);border:2px solid var(--xp2);
+}
+.ft-dot.now{background:var(--xp2);box-shadow:0 0 10px rgba(168,85,247,0.6)}
+.ft-period{font-family:var(--ffm);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--xp2);margin-bottom:4px}
+.ft-price-row{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.ft-price{font-family:var(--ffm);font-size:20px;font-weight:700;color:var(--text)}
+.ft-chg{font-family:var(--ffm);font-size:12px}
+.ft-reason{font-size:12px;color:var(--muted);line-height:1.6}
+.ft-conf-row{display:flex;align-items:center;gap:8px;margin-top:8px}
+.ft-cbar{flex:1;height:3px;background:var(--dim);border-radius:2px;overflow:hidden}
+.ft-cfill{height:100%;background:linear-gradient(90deg,var(--xp),var(--xp2));transition:width 1.2s ease 0.5s;border-radius:2px}
+.ft-clabel{font-family:var(--ffm);font-size:9px;color:var(--muted);white-space:nowrap}
+
+/* ── GAME TAB ── */
+.game-wrap{background:var(--card);border:1px solid rgba(168,85,247,0.2);border-radius:20px;padding:22px;margin-bottom:20px;text-align:center;position:relative;overflow:hidden}
+.game-wrap::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(124,58,237,0.08),transparent 60%);pointer-events:none}
+
+.game-hud{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.hud-item{text-align:center}
+.hud-val{font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--xp2)}
+.hud-label{font-size:10px;color:var(--muted);font-family:var(--ffm);letter-spacing:0.1em}
+.hud-streak .hud-val{color:var(--gold)}
+.hud-acc .hud-val{color:var(--green)}
+
+.game-q-num{font-family:var(--ffm);font-size:10px;letter-spacing:0.2em;color:var(--muted);margin-bottom:12px;text-transform:uppercase}
+.game-q{
+  background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:14px;padding:18px;margin-bottom:16px;
+  font-size:15px;font-weight:700;line-height:1.5;color:var(--text);text-align:left;
+}
+.game-context{
+  background:rgba(0,191,255,0.04);border:1px solid rgba(0,191,255,0.1);
+  border-radius:10px;padding:12px;margin-bottom:18px;
+  font-size:12px;color:#5a7a9a;line-height:1.7;text-align:left;
+}
+.game-context strong{color:var(--blue)}
+
+.opts-grid{display:flex;flex-direction:column;gap:9px;margin-bottom:16px}
+.opt-btn{
+  width:100%;padding:13px 16px;border-radius:12px;border:1.5px solid var(--border);
+  background:var(--card2);color:var(--text);font-family:var(--ff);font-size:13px;font-weight:600;
+  cursor:pointer;transition:all 0.2s;display:flex;align-items:center;gap:12px;text-align:left;
+}
+.opt-btn:hover:not(:disabled){border-color:rgba(168,85,247,0.4);background:rgba(124,58,237,0.08);transform:translateX(4px)}
+.opt-btn.correct{border-color:var(--green);background:rgba(0,230,118,0.08);color:var(--green)}
+.opt-btn.wrong{border-color:var(--red);background:rgba(255,69,96,0.08);color:var(--red)}
+.opt-btn:disabled{cursor:default}
+.opt-btn:disabled:not(.correct):not(.wrong){opacity:0.45}
+.opt-letter{
+  width:28px;height:28px;border-radius:8px;background:var(--dim);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--ffm);font-size:11px;font-weight:700;flex-shrink:0;transition:all 0.2s;
+}
+.opt-btn.correct .opt-letter{background:var(--green);color:var(--bg)}
+.opt-btn.wrong .opt-letter{background:var(--red);color:white}
+
+.game-result{
+  border-radius:14px;padding:16px;font-size:13px;line-height:1.7;
+  display:none;animation:fadeSlide 0.3s ease;text-align:left;margin-bottom:12px;
+}
+.game-result.show{display:block}
+.game-result.right{background:rgba(0,230,118,0.07);border:1px solid rgba(0,230,118,0.2);color:#a0e8c0}
+.game-result.wrong{background:rgba(255,69,96,0.07);border:1px solid rgba(255,69,96,0.2);color:#ffa0b0}
+.game-result strong{color:var(--text)}
+
+.xp-pop{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:var(--ffm);font-size:32px;font-weight:700;
+  pointer-events:none;opacity:0;color:var(--gold);
+}
+.xp-pop.fire{animation:xpFly 1s ease forwards}
+@keyframes xpFly{
+  0%{opacity:0;transform:translate(-50%,-100%) scale(0.5)}
+  30%{opacity:1;transform:translate(-50%,-120%) scale(1.3)}
+  100%{opacity:0;transform:translate(-50%,-180%) scale(1)}
+}
+
+.next-q-btn{
+  padding:11px 28px;border-radius:12px;border:1px solid rgba(168,85,247,0.3);
+  background:rgba(124,58,237,0.1);color:var(--xp2);font-family:var(--ffm);
+  font-size:11px;letter-spacing:0.1em;cursor:pointer;transition:all 0.2s;
+  display:none;
+}
+.next-q-btn:hover{background:rgba(124,58,237,0.2)}
+.next-q-btn.show{display:inline-block}
+
+/* SCORE BOARD */
+.score-summary{
+  background:var(--card2);border:1px solid rgba(168,85,247,0.15);
+  border-radius:16px;padding:22px;text-align:center;display:none;
+}
+.score-summary.show{display:block;animation:fadeSlide 0.4s ease}
+.ss-trophy{font-size:56px;animation:bounce 1s ease}
+@keyframes bounce{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+.ss-title{font-family:var(--ffh);font-size:24px;font-weight:700;color:var(--gold);margin:10px 0 4px}
+.ss-sub{font-size:13px;color:var(--muted);margin-bottom:20px}
+.ss-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+.ss-stat{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
+.ss-val{font-family:var(--ffm);font-size:22px;font-weight:700;color:var(--text)}
+.ss-label{font-size:11px;color:var(--muted);margin-top:2px}
+.replay-btn{padding:12px 28px;border-radius:12px;border:1px solid rgba(245,200,66,0.3);background:rgba(245,200,66,0.08);color:var(--gold);font-family:var(--ffm);font-size:11px;letter-spacing:0.1em;cursor:pointer;transition:all 0.2s}
+.replay-btn:hover{background:rgba(245,200,66,0.15)}
+
+/* LEARN TAB */
+.learn-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.learn-card{
+  background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:16px;
+  cursor:pointer;transition:all 0.25s;
+}
+.learn-card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,0.12)}
+.lc-icon{font-size:28px;margin-bottom:8px}
+.lc-title{font-size:13px;font-weight:700;margin-bottom:4px}
+.lc-sub{font-size:11px;color:var(--muted);line-height:1.4}
+.lc-badge{display:inline-block;margin-top:8px;font-family:var(--ffm);font-size:9px;letter-spacing:0.1em;padding:2px 7px;border-radius:4px;background:rgba(124,58,237,0.1);color:var(--xp2)}
+
+/* LESSON MODAL */
+#lesson-modal{
+  position:fixed;inset:0;z-index:500;
+  background:rgba(0,0,0,0.85);backdrop-filter:blur(16px);
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity 0.3s;padding:18px;
+}
+#lesson-modal.show{opacity:1;pointer-events:all}
+.lesson-box{
+  background:var(--card);border:1px solid rgba(168,85,247,0.2);
+  border-radius:22px;padding:28px;max-width:520px;width:100%;
+  max-height:88vh;overflow-y:auto;
+  transform:translateY(20px);transition:transform 0.35s cubic-bezier(0.34,1.56,0.64,1);
+}
+#lesson-modal.show .lesson-box{transform:translateY(0)}
+.lb-icon{font-size:48px;margin-bottom:12px}
+.lb-title{font-family:var(--ffh);font-size:22px;font-weight:700;letter-spacing:0.06em;color:var(--gold);margin-bottom:16px}
+.lb-body{font-size:14px;color:#7080a0;line-height:1.85}
+.lb-body strong{color:var(--text);font-weight:700}
+.lb-body h3{color:var(--xp2);font-family:var(--ffm);font-size:11px;letter-spacing:0.15em;text-transform:uppercase;margin:18px 0 6px;display:flex;align-items:center;gap:8px}
+.lb-body h3::before{content:'';width:14px;height:1px;background:var(--xp2)}
+.lb-body .example-box{background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.15);border-radius:10px;padding:12px;margin:10px 0;font-size:13px;color:#8090b8}
+.lb-close{margin-top:20px;padding:11px 24px;border-radius:12px;border:1px solid var(--border);background:var(--card2);color:var(--text);font-family:var(--ffm);font-size:11px;letter-spacing:0.1em;cursor:pointer;transition:all 0.2s;width:100%}
+.lb-close:hover{border-color:var(--xp2);color:var(--xp2)}
+
+/* LEVEL UP TOAST */
+#lvl-toast{
+  position:fixed;top:70px;left:50%;transform:translateX(-50%) translateY(-20px);
+  z-index:1000;background:linear-gradient(135deg,var(--xp),var(--xp2));
+  border-radius:20px;padding:12px 24px;display:flex;align-items:center;gap:10px;
+  opacity:0;transition:all 0.4s cubic-bezier(0.34,1.56,0.64,1);pointer-events:none;
+  box-shadow:0 8px 32px rgba(124,58,237,0.4);
+}
+#lvl-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.lt-icon{font-size:22px}
+.lt-text{font-family:var(--ffh);font-size:16px;font-weight:700;color:white;letter-spacing:0.06em}
+.lt-sub{font-size:11px;color:rgba(255,255,255,0.7)}
+
+/* RESPONSIVE */
+@media(max-width:500px){
+  .price-row{grid-template-columns:1fr 1fr}
+  .learn-grid{grid-template-columns:1fr}
+  .ss-grid{grid-template-columns:repeat(3,1fr)}
+  .game-q{font-size:14px}
+  .arenas-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:360px){
+  .arenas-grid{grid-template-columns:1fr}
+  .price-row{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+
+<!-- LEVEL UP TOAST -->
+<div id="lvl-toast">
+  <span class="lt-icon">⚡</span>
+  <div><div class="lt-text" id="lt-text">LEVEL UP!</div><div class="lt-sub" id="lt-sub">You reached Level 2</div></div>
+</div>
+
+<!-- LESSON MODAL -->
+<div id="lesson-modal" onclick="closelesson()">
+  <div class="lesson-box" onclick="event.stopPropagation()">
+    <div class="lb-icon" id="lb-icon"></div>
+    <div class="lb-title" id="lb-title"></div>
+    <div class="lb-body" id="lb-body"></div>
+    <button class="lb-close" onclick="closelesson()">Got it — close lesson ✓</button>
+  </div>
+</div>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <div class="tb-logo">WORLD IQ</div>
+  <div class="tb-mid">
+    <div class="xp-wrap">
+      <div class="xp-label">XP</div>
+      <div class="xp-bar"><div class="xp-fill" id="xp-fill" style="width:0%"></div></div>
+      <div class="xp-val" id="xp-val">0</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <div class="level-badge" onclick="showLvlModal()">
+      <span class="lv-icon">⚡</span>
+      <span class="lv-num" id="lv-num">1</span>
+      <span class="lv-label">LVL</span>
+    </div>
+    <div class="streak-badge" onclick="showStreakInfo()">
+      <span class="str-fire">🔥</span>
+      <span class="str-num" id="str-num">1</span>
+    </div>
+    <div id="topbar-clock"></div>
+  </div>
+</div>
+
+<!-- HOME SCREEN -->
+<div id="homescreen">
+
+  <div class="home-hero">
+    <div class="home-greeting" id="home-greeting">Good morning</div>
+    <div class="home-title">Learn <span>everything</span><br>about your world</div>
+    <div class="home-sub">Pick an arena. Play, learn, earn XP. Beat yesterday's you.</div>
+  </div>
+
+  <!-- DAILY QUEST -->
+  <div class="quest-bar">
+    <div class="quest-icon">🎯</div>
+    <div class="quest-content">
+      <div class="quest-title">Daily Quest — Complete 2 arenas</div>
+      <div class="quest-sub">You've visited <span id="quest-count">0</span> of 2 today</div>
+      <div class="quest-progress-wrap">
+        <div class="quest-prog-bar"><div class="quest-prog-fill" id="quest-fill" style="width:0%"></div></div>
+        <div class="quest-pct" id="quest-pct">0%</div>
+      </div>
+    </div>
+    <div class="quest-reward">+150 XP</div>
+  </div>
+
+  <!-- ARENAS -->
+  <div class="arenas-label">Choose Your Arena</div>
+  <div class="arenas-grid">
+    <div class="arena-card arena-gold" onclick="openArena('gold')">
+      <div class="arena-emoji">🥇</div>
+      <div class="arena-name">Gold & Silver</div>
+      <div class="arena-sub">Prices, reasons, forecasts & prediction games</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak" id="gold-streak">↑ Hot today</div>
+      </div>
+    </div>
+    <div class="arena-card arena-india" onclick="openArena('india')">
+      <div class="arena-emoji">🇮🇳</div>
+      <div class="arena-name">India</div>
+      <div class="arena-sub">Economy, politics, markets, culture</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak">GDP: 8.4%</div>
+      </div>
+    </div>
+    <div class="arena-card arena-world" onclick="openArena('world')">
+      <div class="arena-emoji">🌐</div>
+      <div class="arena-name">World</div>
+      <div class="arena-sub">Geopolitics, global events, nations</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak">4 hot stories</div>
+      </div>
+    </div>
+    <div class="arena-card arena-tech" onclick="openArena('tech')">
+      <div class="arena-emoji">⚡</div>
+      <div class="arena-name">Tech & AI</div>
+      <div class="arena-sub">AI, startups, chips, future tech</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak">🔥 Trending</div>
+      </div>
+    </div>
+    <div class="arena-card arena-markets" onclick="openArena('markets')">
+      <div class="arena-emoji">📈</div>
+      <div class="arena-name">Markets</div>
+      <div class="arena-sub">Stocks, crypto, indices, investing</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak">Sensex +0.43%</div>
+      </div>
+    </div>
+    <div class="arena-card arena-science" onclick="openArena('science')">
+      <div class="arena-emoji">🧬</div>
+      <div class="arena-name">Science</div>
+      <div class="arena-sub">Space, physics, biology, discoveries</div>
+      <div class="arena-footer">
+        <div class="arena-xp-badge">+50 XP/game</div>
+        <div class="arena-streak">New mission!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACHIEVEMENTS -->
+  <div class="arenas-label">Achievements</div>
+  <div class="achieve-row">
+    <div class="achieve" onclick="showAchieve('First Step','You opened WORLD IQ for the first time. Every expert was once a beginner.')">
+      <div class="achieve-icon">🚀</div><div class="achieve-name">First Step</div>
+    </div>
+    <div class="achieve" id="ach-quiz" onclick="showAchieve('Quiz Master','Answered 5 questions correctly. Your financial IQ is growing!')">
+      <div class="achieve-icon">🧠</div><div class="achieve-name">Quiz Master</div>
+    </div>
+    <div class="achieve locked" id="ach-streak">
+      <div class="achieve-icon">🔥</div><div class="achieve-name">On Fire</div>
+    </div>
+    <div class="achieve locked" id="ach-gold">
+      <div class="achieve-icon">🥇</div><div class="achieve-name">Gold Expert</div>
+    </div>
+    <div class="achieve locked" id="ach-all">
+      <div class="achieve-icon">🌍</div><div class="achieve-name">World Class</div>
+    </div>
+    <div class="achieve locked">
+      <div class="achieve-icon">💎</div><div class="achieve-name">Diamond IQ</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ARENA SCREEN -->
+<div id="arenascreen">
+  <div class="arena-topbar">
+    <button class="back-btn" onclick="goHome()">←</button>
+    <div class="arena-top-info">
+      <div class="arena-top-name" id="arena-top-name">Gold & Silver</div>
+      <div class="arena-top-sub" id="arena-top-sub">Prices · Forecast · Game · Learn</div>
+    </div>
+    <div class="arena-top-xp" id="arena-xp-display">+0 XP today</div>
+  </div>
+
+  <div class="inner-tabs" id="inner-tabs">
+    <button class="itab active" onclick="switchInner(0)">📊 Live</button>
+    <button class="itab" onclick="switchInner(1)">🤔 Why?</button>
+    <button class="itab" onclick="switchInner(2)">🔮 Forecast</button>
+    <button class="itab" onclick="switchInner(3)">🎮 Game</button>
+    <button class="itab" onclick="switchInner(4)">📚 Learn</button>
+  </div>
+
+  <div class="arena-content">
+
+    <!-- LIVE TAB -->
+    <div class="ipanel active" id="ip0">
+      <div id="live-content"></div>
+    </div>
+
+    <!-- WHY TAB -->
+    <div class="ipanel" id="ip1">
+      <div id="why-content"></div>
+    </div>
+
+    <!-- FORECAST TAB -->
+    <div class="ipanel" id="ip2">
+      <div id="forecast-content"></div>
+    </div>
+
+    <!-- GAME TAB -->
+    <div class="ipanel" id="ip3">
+      <div id="game-content"></div>
+    </div>
+
+    <!-- LEARN TAB -->
+    <div class="ipanel" id="ip4">
+      <div id="learn-content"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════
+const S = {
+  xp: parseInt(localStorage.getItem('wiq_xp')||'0'),
+  level: parseInt(localStorage.getItem('wiq_level')||'1'),
+  streak: (()=>{
+    const d=JSON.parse(localStorage.getItem('wiq_streak')||'{"count":1,"last":""}');
+    const t=new Date().toDateString();
+    if(d.last===t) return d.count;
+    d.count = d.last===new Date(Date.now()-86400000).toDateString() ? d.count+1 : 1;
+    d.last=t; localStorage.setItem('wiq_streak',JSON.stringify(d)); return d.count;
+  })(),
+  questCount: parseInt(sessionStorage.getItem('wiq_quest')||'0'),
+  arenaXP: 0,
+  gameScore: 0,
+  gameQ: 0,
+  gameStreak: 0,
+  gameCorrect: 0,
+  currentArena: 'gold',
+  visitedArenas: new Set(),
+  totalCorrect: parseInt(localStorage.getItem('wiq_correct')||'0'),
+};
+
+const XP_PER_LEVEL = 200;
+
+function saveState(){
+  localStorage.setItem('wiq_xp', S.xp);
+  localStorage.setItem('wiq_level', S.level);
+  localStorage.setItem('wiq_correct', S.totalCorrect);
+}
+
+// ═══════════════════════════════════════
+// ARENA DATA
+// ═══════════════════════════════════════
+const ARENAS = {
+
+  gold: {
+    name: '🥇 Gold & Silver',
+    sub: 'Precious Metals Intelligence',
+    color: '#f5c842',
+    live: () => `
+      <div class="card-label" style="color:var(--gold)">◆ Live Prices — Feb 21, 2025</div>
+      <div class="price-row">
+        <div class="price-card gold-c">
+          <div class="pc-tag"><span class="pc-dot" style="background:var(--gold)"></span><span style="color:var(--gold)">GOLD</span></div>
+          <div class="pc-price">₹63,420</div>
+          <div class="pc-sub">per 10 grams (MCX)</div>
+          <div class="pc-change up">▲ +₹180 &nbsp;+0.28%</div>
+          <div class="pc-intl">Global: $2,034/oz</div>
+        </div>
+        <div class="price-card silver-c">
+          <div class="pc-tag"><span class="pc-dot" style="background:var(--silver)"></span><span style="color:var(--silver)">SILVER</span></div>
+          <div class="pc-price">₹74,800</div>
+          <div class="pc-sub">per kg (MCX)</div>
+          <div class="pc-change up">▲ +₹320 &nbsp;+0.43%</div>
+          <div class="pc-intl">Global: $22.80/oz</div>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <div class="chart-header">
+          <div class="chart-title">30-Day Price Chart</div>
+          <div class="range-btns">
+            <button class="rb act" onclick="switchRange(this,'7d')">7D</button>
+            <button class="rb" onclick="switchRange(this,'1m')">1M</button>
+            <button class="rb" onclick="switchRange(this,'3m')">3M</button>
+            <button class="rb" onclick="switchRange(this,'1y')">1Y</button>
+          </div>
+        </div>
+        <canvas id="priceChart"></canvas>
+        <div class="chart-legend">
+          <div class="cl-item"><div class="cl-dot" style="background:var(--gold)"></div>Gold (₹/10g)</div>
+          <div class="cl-item"><div class="cl-dot" style="background:var(--silver)"></div>Silver (₹/kg ÷ 10)</div>
+        </div>
+      </div>
+      <div class="card" style="border-color:rgba(245,200,66,0.15)">
+        <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
+        <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+          <div>
+            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--text)">+12.4%</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">Gold YTD 2025</div>
+          </div>
+          <div>
+            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--text)">+8.1%</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">Silver YTD 2025</div>
+          </div>
+          <div>
+            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--green)">BULL</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">Market Trend</div>
+          </div>
+        </div>
+      </div>
+    `,
+    why: () => `
+      <div class="card-label" style="color:var(--gold)">◆ Why did Gold & Silver move today?</div>
+      ${makeWhyCard('🏦','Fed Rate Cut Signals','US Dollar Weakens','BULLISH',
+        `<span class="tag" style="background:rgba(0,230,118,0.1);color:var(--green)">KEY DRIVER</span>
+        The US Federal Reserve signalled <strong>2 interest rate cuts in 2025</strong>. When US rates fall, the dollar weakens. Since gold is priced in dollars globally, a <strong>weaker dollar = gold gets cheaper for the rest of the world = more demand = higher price</strong>.
+        <br><br>Think of it like this: if you're in India and the dollar drops, you can buy the same gold for fewer rupees. More Indians buy → price goes up.`)}
+      ${makeWhyCard('⚠️','Geopolitical Tension','Middle East & Russia-Ukraine conflict','BULLISH',
+        `Gold is called a <strong>"safe haven asset"</strong> — when the world feels uncertain, people move money FROM risky assets (stocks) INTO gold. It's like insurance for your wealth.
+        <br><br>Historically, <strong>every major conflict since 1970 has pushed gold up 10–30%</strong> within 3 months. Current tensions in the Middle East are keeping gold elevated.`)}
+      ${makeWhyCard('🇨🇳','China & India Buying','Central Banks accumulate gold reserves','BULLISH',
+        `In 2024, <strong>China's central bank bought 735 tonnes of gold</strong> — a record. India's RBI also added 65 tonnes. Central banks buy gold to reduce dependence on the US dollar (called "de-dollarization").
+        <br><br>When a central bank buys hundreds of tonnes, it moves the market significantly. <strong>You and a billion others are essentially riding China's coattail.</strong>`)}
+      ${makeWhyCard('🏭','Industrial Demand for Silver','EVs & Solar panels need silver','BULLISH',
+        `Silver isn't just jewellery — it's a <strong>critical industrial metal</strong>. Every solar panel needs silver paste. Every electric vehicle has silver contacts. 
+        <br><br>India's target: 500GW solar by 2030. Each GW of solar uses ~30 tonnes of silver. That's <strong>15,000 tonnes of demand from India alone</strong> — over the next 5 years.`)}
+      ${makeWhyCard('💰','Dollar Index Decline','DXY drops to 103.2','BULLISH',
+        `The DXY (Dollar Index) measures USD strength against other currencies. Today it dropped to 103.2.
+        <br><br><strong>Rule of thumb:</strong> DXY up → Gold down. DXY down → Gold up. They move in almost perfect opposition about 80% of the time. Today's DXY decline of 0.4% explains about half of gold's 0.28% gain.`)}
+      ${makeWhyCard('📈','Inflation Fears','CPI data higher than expected','NEUTRAL',
+        `India's CPI came in at 5.1% — above RBI's 4% target. Gold is historically the best hedge against inflation.
+        <br><br>The saying: <strong>"Gold holds its value when paper currency doesn't."</strong> ₹1 lakh in 1990 buys what ₹4,200 buys today. ₹1 lakh worth of gold in 1990 is worth ₹42 lakh today.`)}
+    `,
+    forecast: () => `
+      <div class="card-label" style="color:var(--xp2)">◆ Price Forecast — AI + Analyst Consensus</div>
+      <div class="card" style="border-color:rgba(168,85,247,0.2);margin-bottom:20px">
+        <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.12);border-radius:10px;padding:12px;font-size:12px;color:#6070a0;margin-bottom:16px">
+          ⚠️ <strong style="color:var(--text)">Disclaimer:</strong> Forecasts are based on analyst consensus, technical analysis & macro models. Not financial advice. Always do your own research.
+        </div>
+        <div class="ft-wrap">
+          <div class="ft-line-vert"></div>
+          ${makeFT('NOW (Today)','₹63,420','$2,034/oz','—','',
+            'Current price. Gold is trading above its 200-day moving average — technically bullish.',92,true)}
+          ${makeFT('1 MONTH','₹65,000–66,500','$2,080–2,120/oz','+2.5%',true,
+            'Fed rate cut expectations building. Dollar weakening trend continues. RBI may cut rates which typically boosts gold.',78,false)}
+          ${makeFT('3 MONTHS','₹67,000–70,000','$2,150–2,250/oz','+7%',true,
+            'Monsoon season typically raises Indian gold buying. US elections uncertainty historically spikes gold. China demand remains strong.',72,false)}
+          ${makeFT('6 MONTHS','₹68,000–74,000','$2,200–2,400/oz','+12%',true,
+            'Fed rate cuts likely begin Q3. Geopolitical tensions unpredictable. Solar/EV industrial demand for silver accelerating.',65,false)}
+          ${makeFT('1 YEAR','₹72,000–80,000','$2,300–2,600/oz','+22%',true,
+            'Long-term bull case: Continued de-dollarization, central bank buying, inflation hedge demand. Bears argue: economic recovery reduces safe haven appeal.',58,false)}
+        </div>
+      </div>
+      <div class="card" style="border-color:rgba(200,216,238,0.15)">
+        <div class="card-label" style="color:var(--silver)">◆ Silver Specific Forecast</div>
+        <div class="ft-wrap">
+          <div class="ft-line-vert" style="background:linear-gradient(to bottom,var(--silver),rgba(200,216,238,0.1))"></div>
+          ${makeFT('NOW','₹74,800/kg','$22.80/oz','—','','Silver lagging gold. Gold-Silver ratio at 89:1 — historically high. Silver tends to catch up.',85,true)}
+          ${makeFT('6 MONTHS','₹82,000–90,000/kg','$25–28/oz','+15–20%',true,
+            'Solar panel demand surge. India\'s renewable energy expansion. Silver typically outperforms gold in the second half of bull cycles.',70,false)}
+        </div>
+      </div>
+    `,
+    questions: [
+      {
+        q: "Gold is priced at $2,034/oz globally. Today the US Dollar got WEAKER. What happens to gold's price?",
+        ctx: "💡 Context: Gold is bought and sold globally in US Dollars. When the dollar weakens, foreign currencies can buy more dollars — and therefore more gold — with the same amount of local money.",
+        opts:["Gold price stays the same","Gold price DROPS because dollar weakened","Gold price RISES because a weaker dollar = more demand from non-US buyers","Impossible to predict"],
+        ans:2, xp:50,
+        explain:"✅ Correct! A weaker dollar makes gold cheaper for buyers in India, Europe, China etc. They buy more → higher demand → price rises. This is why Gold and the Dollar Index (DXY) almost always move in OPPOSITE directions."
+      },
+      {
+        q: "If you had ₹1 lakh in 1990, and kept it as cash vs buying gold — what's the difference today?",
+        ctx: "💡 Context: India's inflation since 1990 has eroded purchasing power significantly. Meanwhile gold has risen ~40x. This question tests your understanding of inflation hedging.",
+        opts:["Cash: ₹1L → still ₹1L | Gold: ₹1L → ₹8L","Cash: ₹1L → ₹3L | Gold: ₹1L → ₹15L","Cash: ₹1L → ₹4,200 real value | Gold: ₹1L → ₹40L","They would be equal due to bank interest"],
+        ans:2, xp:60,
+        explain:"✅ Correct! Inflation destroyed the purchasing power of cash — ₹1 lakh in 1990 buys only what ₹4,200–5,000 buys today. But gold bought in 1990 at ~₹3,200/10g is now ₹63,000+. Gold appreciated ~20x in nominal terms, far outpacing inflation."
+      },
+      {
+        q: "Silver's price has been rising because of ONE big trend in technology. Which one?",
+        ctx: "💡 Context: Silver isn't just for jewellery. It's a critical industrial metal used in electronics, solar panels, and electric vehicles — all growing sectors in 2025.",
+        opts:["Smartphones (silver in circuit boards)","Solar panels & electric vehicles (silver paste & contacts)","Satellites (silver wiring in space)","AI servers (silver cooling systems)"],
+        ans:1, xp:50,
+        explain:"✅ Correct! Every solar panel uses silver paste for conductivity. Every EV uses silver in battery contacts and circuits. India's 500GW solar target alone = ~15,000 tonnes of silver demand by 2030. This structural industrial demand is a major long-term bullish driver for silver."
+      },
+      {
+        q: "Gold is called a 'Safe Haven'. If tomorrow there's a major war between two large countries, what should you EXPECT?",
+        ctx: "💡 Context: Safe haven assets are things investors run TO when they're scared — they hold value or rise when everything else falls. Understanding this can help you protect your wealth.",
+        opts:["Gold drops — people sell everything in panic","Gold stays flat — wars don't affect commodities","Gold RISES — fear increases demand for safe haven assets","Gold is banned during war periods"],
+        ans:2, xp:50,
+        explain:"✅ Correct! Every major conflict since 1970 has pushed gold up. The 2022 Russia-Ukraine war: gold jumped 8% in 2 weeks. The 2008 financial crisis: gold doubled over 2 years. When uncertainty rises, gold shines. It's why central banks hold gold as a reserve — it works when everything else doesn't."
+      },
+      {
+        q: "The Gold-Silver ratio today is 89:1. Historically it averages 60:1. What does this LIKELY mean?",
+        ctx: "💡 Context: The Gold-Silver ratio tells you how many ounces of silver it takes to buy 1 ounce of gold. When the ratio is HIGH, silver is relatively cheap compared to gold.",
+        opts:["Gold is too cheap — sell silver, buy gold","Silver is relatively cheap — it may outperform gold going forward","The ratio means gold will fall 89% soon","Both metals will rise equally"],
+        ans:1, xp:70,
+        explain:"✅ Correct! When the ratio is high (89 vs historical 60), silver is relatively undervalued compared to gold. In past cycles, when the ratio reverts to mean, silver rises FASTER than gold. Many analysts call this the 'silver catch-up trade' — silver outperforming in the second half of precious metal bull markets."
+      }
+    ],
+    learn: [
+      {icon:'🏦',title:'Why Central Banks Buy Gold',sub:'The secret war against the US Dollar',badge:'Beginner',
+       body:`<h3>The Big Picture</h3>Since 1971, the US dollar has been the world's "reserve currency" — all global trade (oil, wheat, chips) is priced in USD. This gives America enormous power.<br><br><strong>Countries are quietly fighting back</strong> by buying gold instead of holding US dollars as reserves.
+       <h3>Who's buying?</h3>In 2024:<br>• China: 735 tonnes<br>• India (RBI): 65 tonnes<br>• Poland: 90 tonnes<br>• Turkey: 75 tonnes<br><br>This is called <strong>"de-dollarization"</strong> — reducing dependence on the US.
+       <h3>Why does this push gold UP?</h3>When central banks buy hundreds of tonnes, they remove supply from the market. Less supply + same demand = higher price. You benefit just by holding gold or gold ETFs.
+       <div class="example-box">🇮🇳 <strong>India angle:</strong> RBI now holds 800+ tonnes of gold. They recently brought 100 tonnes back from Bank of England storage to India. This signals confidence in gold's long-term role.</div>`},
+      {icon:'⚡',title:'Gold vs Inflation',sub:'The ultimate rupee destroyer explained',badge:'Beginner',
+       body:`<h3>What is Inflation Really?</h3>Every year, the government prints more money. More money chasing the same goods = prices rise. This is inflation. It's why your grandfather's ₹100/month salary sounds absurd today.
+       <h3>The Numbers</h3>India's inflation since 1990: ~7-8% per year on average.<br>₹1 lakh in 1990 → has the purchasing power of ~₹5,000 today.<br><br><strong>Gold in 1990: ₹3,200/10g → Today: ₹63,000/10g</strong> — that's 20x growth.
+       <h3>The Rule</h3>Gold doesn't "earn" money like a business. But it holds REAL value over time. It's not an investment for getting rich — it's an insurance policy against currency destruction.
+       <div class="example-box">💡 <strong>Practical tip:</strong> Keep 10-15% of your wealth in gold (ideally Sovereign Gold Bonds for 2.5% interest bonus). Use it as your financial foundation, not your growth engine.</div>`},
+      {icon:'☀️',title:'Silver & The Green Revolution',sub:'How solar panels & EVs are making silver scarce',badge:'Intermediate',
+       body:`<h3>Silver is More Than Jewellery</h3>About 50% of all silver demand is now industrial. Here's where it goes:<br><br>• <strong>Solar panels:</strong> Each panel uses ~20g of silver paste for conductivity. At 1MW of solar = ~500kg of silver.<br>• <strong>Electric vehicles:</strong> Each EV uses 25-50g of silver in circuits, contacts and sensors.<br>• <strong>Electronics:</strong> Every smartphone has ~0.3g of silver.
+       <h3>The India Impact</h3>India's renewable energy target: <strong>500GW by 2030</strong>.<br>Silver needed: ~15,000 tonnes — from solar alone.<br>Global silver production: ~27,000 tonnes/year.<br><br>India's demand = more than half of global annual production. Over 5 years. This is a structural supply crunch.
+       <div class="example-box">📈 <strong>Investment angle:</strong> Silver ETFs (like SilverBees on NSE) give pure silver exposure. In bull markets for precious metals, silver often rises 2-3x more than gold due to its smaller market size.</div>`},
+      {icon:'📊',title:'How to Read Gold Charts',sub:'Technical analysis in 5 minutes',badge:'Advanced',
+       body:`<h3>Key Concepts</h3><strong>200-Day Moving Average (200-DMA):</strong> The average price over 200 trading days. When price is ABOVE 200-DMA = bullish trend. Below = bearish. Gold is currently above it — bullish signal.
+       <h3>Support & Resistance</h3>• <strong>Support:</strong> Price level where buyers step in (floor). Gold's support: ~$1,980/oz<br>• <strong>Resistance:</strong> Price level where sellers appear (ceiling). Gold's resistance: $2,100/oz
+       <h3>The Gold-Silver Ratio</h3>Current: 89:1. Historical average: 60:1. When ratio is high (like now), silver is "cheap" relative to gold. In the last 3 bull cycles, silver outperformed gold by 2-3x in the second phase.
+       <div class="example-box">🔑 <strong>Simple rule:</strong> If gold price > 200-DMA AND Fed is cutting rates AND geopolitical tension is high → three green lights for gold. All three are true right now.</div>`}
+    ]
+  },
+
+  india: {
+    name:'🇮🇳 India Arena', sub:'Economy · Politics · Culture · Markets', color:'#ff8c42',
+    live:()=>`
+      <div class="card-label" style="color:var(--orange)">◆ India Today — Feb 21, 2025</div>
+      <div class="price-row">
+        <div class="price-card" style="border-color:rgba(255,140,66,0.2)">
+          <div class="pc-tag" style="color:var(--orange)">GDP GROWTH</div>
+          <div class="pc-price" style="font-size:36px">8.4%</div>
+          <div class="pc-sub">Q3 FY24 — World's fastest</div>
+          <div class="pc-change up">▲ Fastest G20</div>
+        </div>
+        <div class="price-card" style="border-color:rgba(255,140,66,0.2)">
+          <div class="pc-tag" style="color:var(--orange)">SENSEX</div>
+          <div class="pc-price">72,430</div>
+          <div class="pc-sub">BSE · 21 Feb 2025</div>
+          <div class="pc-change up">▲ +312 pts (+0.43%)</div>
+        </div>
+      </div>
+      <div class="card"><div class="card-label" style="color:var(--orange)">◆ Top India Stories</div>
+      ${makeNewsItem('🏗️','Govt approves ₹1.2L Cr railway expansion','50 new stations, Vande Bharat to 50 more routes','ECONOMY')}
+      ${makeNewsItem('🤖','Reliance Jio AI in 22 Indian languages','Free for 450M Jio users — targets Bharat','TECH')}
+      ${makeNewsItem('📊','FII buys ₹4,200 Cr Indian equities this week','IT & Banking sectors attract most inflows','MARKETS')}
+      ${makeNewsItem('⚡','India adds 2.4 GW solar capacity in January','Fastest ever monthly addition — on track for 500GW','ENERGY')}
+      </div>`,
+    why:()=>`<div class="card-label" style="color:var(--orange)">◆ Why India's economy is growing</div>
+      ${makeWhyCard('🏭','Manufacturing Boom (PLI Scheme)','₹2L Cr incentives boosting production','BULLISH','India\'s <strong>Production-Linked Incentive</strong> scheme gives cash back to companies that manufacture in India. Apple now makes 14% of iPhones here. Dixon makes Samsung TVs. Tata makes iPhones. <br><br>This created 1.8 million new factory jobs in 2024 alone. More jobs → more spending → economy grows.')}
+      ${makeWhyCard('👥','Demographic Dividend','65% of India is under 35','BULLISH','India adds <strong>~1 million new workers to the labour force every month</strong>. Compare: Japan is aging and shrinking. China\'s workforce peaked. The US is stagnant.<br><br>Young workers = producers AND consumers. They build things AND buy things. This demographic tailwind will power India\'s growth for 20+ years.')}
+      ${makeWhyCard('💻','IT Services Boom','AI is creating more work, not less','BULLISH','Every global company upgrading to AI needs Indian engineers to implement it. Infosys, TCS, Wipro are winning massive AI transformation contracts.<br><br>Indian IT export revenue: <strong>$250B in FY24</strong> — up 11% YoY. This brings foreign exchange into India, strengthens the rupee, and boosts tax revenues.')}
+    `,
+    forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ India Economic Outlook</div>
+      <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
+      ${makeFT('2025','GDP: 7.8–8.5%','Sensex target: 80,000','','',
+        'IMF projects India as fastest G20 economy. RBI likely to cut rates once in H2 — boosting markets. Election results already priced in.',80,true)}
+      ${makeFT('2026–27','GDP: 8–9%','₹100L Cr economy','','',
+        'India\'s middle class expanding by 40M people/year. Infrastructure spending highest ever. Digital economy doubling.',70,false)}
+      ${makeFT('2030','$5 Trillion Economy','3rd largest globally','','',
+        'Target: Overtake Japan and Germany. Realistic if current trajectory holds. Manufacturing + services + digital = diversified growth engine.',60,false)}
+      </div></div>`,
+    questions:[
+      {q:"India's GDP grew 8.4%. What does GDP actually measure?",ctx:"💡 GDP = Gross Domestic Product. It measures the total value of everything produced in a country in a year.",
+       opts:["How much gold a country has","Total value of all goods & services produced","How happy citizens are","Government tax collection"],
+       ans:1,xp:40,explain:"✅ GDP measures the total economic output. Think of India as a factory — GDP is the total value of everything that factory produced in a year. Higher GDP = more production = more jobs = more prosperity (ideally)."},
+      {q:"The RBI kept the repo rate at 6.5%. If RBI CUTS this rate next month, what happens to HOME LOAN interest rates?",ctx:"💡 Repo rate = the rate RBI charges banks for borrowing money. Banks use this rate as a baseline for all loans they give.",
+       opts:["Home loan rates go UP","Home loan rates stay the same","Home loan rates go DOWN — banks borrow cheaper, pass savings on","Home loans get banned temporarily"],
+       ans:2,xp:50,explain:"✅ When RBI cuts the repo rate, banks can borrow money from RBI more cheaply. They pass (some of) these savings to customers. Your EMI on a ₹50L home loan could drop by ₹2,000–3,000/month after a 0.5% rate cut."},
+    ],
+    learn:[
+      {icon:'🏦',title:'How RBI Controls Your Money',sub:'The most powerful institution in India',badge:'Beginner',
+       body:`<h3>What is RBI?</h3>The Reserve Bank of India is India's central bank. It controls the money supply, sets interest rates, and regulates all banks. It's the banker to the government and the banker to all banks.
+       <h3>The Repo Rate — India's Lever</h3>The repo rate is RBI's main tool. When they raise it, borrowing gets expensive — economy cools (fights inflation). When they cut it, borrowing gets cheap — economy heats up (boosts growth).
+       <div class="example-box">🏠 <strong>Your life example:</strong> RBI cuts rate 0.5% → your bank's rate drops (eventually) → on a ₹50L loan, you save ₹2,500/month → ₹30,000/year → ₹5L over a 15-year loan. That's real money from one RBI meeting.</div>`},
+    ]
+  },
+
+  world:{name:'🌐 World Arena',sub:'Geopolitics · Global Events · Nations',color:'#00e676',
+    live:()=>`<div class="card-label" style="color:var(--green)">◆ World Today</div>
+    <div class="card">${makeNewsItem('🇺🇸','Fed signals 2 rate cuts in 2025','Dollar weakens — emerging markets rally','USA')}
+    ${makeNewsItem('🇨🇳','DeepSeek R2 reportedly beats GPT-5','Built at 1/10th the cost of US models','CHINA')}
+    ${makeNewsItem('🇪🇺','EU AI Act enters enforcement phase','Fines up to 7% of global revenue','EUROPE')}
+    ${makeNewsItem('🇸🇦','Saudi Arabia $38B tech investment','Vision 2030 accelerates AI push','GULF')}
+    ${makeNewsItem('🇯🇵','Bank of Japan raises rates to 0.5%','Yen strengthens, carry trade unwinds','JAPAN')}
+    </div>`,
+    why:()=>`<div class="card-label" style="color:var(--green)">◆ Why the world moved today</div>
+    ${makeWhyCard('🏦','Fed Rate Cut Signals','2 cuts expected in H2 2025','BULLISH','When the US Fed cuts rates, global capital flows OUT of US treasuries (which yield less) and INTO emerging markets like India and Brazil. More foreign money coming into India = rupee strengthens, stock market rises.')}
+    ${makeWhyCard('🤖','China AI Competition','DeepSeek challenges US AI dominance','NEUTRAL','China\'s DeepSeek built a competitive AI model for $6M — OpenAI\'s GPT-4 cost $100M+. This proves <strong>AI is democratizing</strong>. The US monopoly on AI may be ending, which could reshape the entire tech industry globally.')}
+    ${makeWhyCard('⚖️','EU AI Regulation','World\'s first comprehensive AI law','NEUTRAL','The EU\'s AI Act creates mandatory rules for AI systems. High-risk AI (healthcare, justice, infrastructure) faces strict audits. Non-compliance: up to 7% of global revenue. This is the GDPR of AI — it will shape global AI development.')}`,
+    forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Global Outlook 2025</div>
+    <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
+    ${makeFT('Q2 2025','Fed first rate cut','Dollar weakens 3-5%','','','Emerging markets rally. India, Brazil, Indonesia benefit most. Gold, oil could spike.',75,true)}
+    ${makeFT('Q3 2025','US elections uncertainty','Volatility increases','','','Markets typically drop 5-8% in pre-election quarters. Gold rises as safe haven. India relatively insulated.',65,false)}
+    ${makeFT('2026','AI regulation goes global','EU rules adopted widely','','','Most countries will adopt AI regulations. Companies that comply early win. India building its own framework.',60,false)}
+    </div></div>`,
+    questions:[
+      {q:"When the US Fed raises interest rates, what happens to the Indian stock market (Sensex)?",ctx:"💡 Global capital is mobile — investors move money to wherever returns are highest. US interest rates directly affect how much money flows into India.",
+       opts:["Sensex goes UP — more money flows to India","Sensex is unaffected — India is independent","Sensex tends to go DOWN — global money flows back to US","Sensex doubles automatically"],
+       ans:2,xp:50,explain:"✅ When US rates rise, US bonds become attractive (safe + high return). Foreign investors pull money OUT of 'risky' emerging markets like India and park it in US bonds. Less FII money in India = Sensex drops. This is why global rate decisions matter for YOUR portfolio."},
+    ],
+    learn:[
+      {icon:'🌍',title:'How Global Events Affect Your Money',sub:'Everything is connected',badge:'Beginner',
+       body:`<h3>The Butterfly Effect of Finance</h3>A war in the Middle East can raise your petrol price in Hyderabad within a week. Here's how:
+       <br><br>Middle East conflict → oil supply disruption → global oil price rises → India imports 85% of oil → petrol price rises → transport costs rise → all goods cost more → inflation rises → RBI raises rates → your EMI goes up.
+       <h3>The Key Connections to Watch</h3>• <strong>US Fed decisions</strong> → Global capital flows → India market<br>• <strong>China growth</strong> → Commodity demand → Indian exporters<br>• <strong>Middle East stability</strong> → Oil price → Indian inflation<br>• <strong>Dollar strength</strong> → Rupee value → Import costs
+       <div class="example-box">💡 <strong>Simple habit:</strong> Every time something big happens globally, ask: "Does this affect oil? Does it affect the dollar? Does it affect US interest rates?" If yes to any → India is affected.</div>`},
+    ]
+  },
+
+  tech:{name:'⚡ Tech & AI Arena',sub:'AI · Startups · Chips · Future',color:'#a855f7',
+    live:()=>`<div class="card-label" style="color:var(--xp2)">◆ Tech Pulse</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)">
+        <div class="pc-tag" style="color:var(--xp2)">NVIDIA</div>
+        <div class="pc-price">$874</div>
+        <div class="pc-sub">AI Chip King · NASDAQ</div>
+        <div class="pc-change up">▲ +3.2% today</div>
+      </div>
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)">
+        <div class="pc-tag" style="color:var(--xp2)">AI FUNDING</div>
+        <div class="pc-price">$84B</div>
+        <div class="pc-sub">Global AI investment 2025 YTD</div>
+        <div class="pc-change up">▲ +240% vs 2023</div>
+      </div>
+    </div>
+    <div class="card">${makeNewsItem('🤖','Google Gemini 2.0 beats GPT-4 on 12 benchmarks','Strong in Indian languages: Hindi, Tamil, Telugu','AI')}
+    ${makeNewsItem('💻','TSMC 2nm chip production starts Q3 2025','Powers next-gen iPhones and AI processors','CHIPS')}
+    ${makeNewsItem('🇮🇳','Sarvam AI raises $41M — Indian language models','Targeting 800M non-English speakers in India','INDIA AI')}
+    ${makeNewsItem('🤖','Figure AI humanoid learns car assembly in 10hrs','BMW factory robots expanding to 3 plants','ROBOTICS')}
+    </div>`,
+    why:()=>`<div class="card-label" style="color:var(--xp2)">◆ Why Tech moved today</div>
+    ${makeWhyCard('🧠','AI Spending Boom','Every company is buying AI infrastructure','BULLISH','Microsoft, Google, Amazon, Meta are spending $200B+ combined on AI infrastructure in 2025. This drives demand for NVIDIA chips, data centers, and cloud services. Indian IT companies win implementation contracts from this boom.')}
+    ${makeWhyCard('🇨🇳','China AI Competition','DeepSeek at 1/10th the cost','NEUTRAL','DeepSeek proved frontier AI is achievable at low cost. This is bearish for expensive US AI models but bullish for adoption — cheaper AI = everyone uses it = more demand for Indian engineers to deploy it.')}
+    ${makeWhyCard('⚡','Chip Wars Intensify','TSMC 2nm production confirmed','BULLISH','2nm chips are 30% faster and 25% more power efficient than 3nm. India is in talks with TSMC for a Pune fab. If successful, India could become a chip manufacturing nation by 2030 — transformational for the economy.')}`,
+    forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Tech Outlook</div>
+    <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
+    ${makeFT('2025','AI becomes mainstream','100M+ new AI users in India','','','Jio AI, Sarvam, Krutrim reach mass adoption. Indian AI startups raise $5B+. IT sector revenue +15%.',80,true)}
+    ${makeFT('2026','Humanoid robots enter factories','Physical AI goes commercial','','','Figure, Tesla Optimus in 1000+ factories. Indian IT companies managing robot fleets. New job category: AI-Robot coordinator.',65,false)}
+    ${makeFT('2030','AGI possible','AI surpasses human performance broadly','','','Most cognitive work AI-assisted. New economy emerges. India positioned well — large young population adapting fastest.',45,false)}
+    </div></div>`,
+    questions:[
+      {q:"NVIDIA's stock is up 3.2% today because AI spending is booming. Which Indian sector benefits MOST directly?",ctx:"💡 Think about what Indian companies do for global tech giants — implementation, maintenance, and consulting.",
+       opts:["Indian real estate (data centers need land)","Indian IT services — Infosys, TCS, Wipro get AI contracts","Indian retail — people buy more electronics","Indian agriculture — AI used in farming"],
+       ans:1,xp:50,explain:"✅ Indian IT companies are the world's AI implementation army. Every Fortune 500 company upgrading to AI needs thousands of Indian engineers to integrate, customize, and maintain these systems. When AI spending rises globally → Indian IT revenue rises → stock prices of Infosys, TCS, Wipro go up."},
+    ],
+    learn:[
+      {icon:'🤖',title:'AI Explained Simply',sub:'What it actually is and why it matters to you',badge:'Beginner',
+       body:`<h3>What IS Artificial Intelligence?</h3>AI is software that learns from examples instead of following fixed rules. Traditional software: "If X, do Y." AI: "Here are 1 million examples — figure out the pattern yourself."
+       <h3>Why It Changes Everything</h3>• A doctor shows AI 10 million cancer scans → AI detects cancer better than doctors<br>• A company shows AI 50 years of sales data → AI predicts next month's sales<br>• You show AI (like me) billions of text examples → AI can write, explain, code
+       <h3>How It Affects You Financially</h3>Companies using AI grow faster and cut costs → their stocks rise → if you hold their stocks (or funds containing them), your wealth grows.
+       <div class="example-box">💼 <strong>Indian opportunity:</strong> India has 5 million+ software engineers. AI doesn't replace them — it makes each one 10x more productive. India's IT exports could hit $500B by 2030 (vs $250B today) because of AI multiplier effect.</div>`},
+    ]
+  },
+
+  markets:{name:'📈 Markets Arena',sub:'Stocks · Crypto · Indices · Investing',color:'#00bfff',
+    live:()=>`<div class="card-label" style="color:var(--blue)">◆ Market Pulse</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(0,191,255,0.2)">
+        <div class="pc-tag" style="color:var(--blue)">SENSEX</div>
+        <div class="pc-price">72,430</div>
+        <div class="pc-sub">BSE · Live</div>
+        <div class="pc-change up">▲ +312 · +0.43%</div>
+      </div>
+      <div class="price-card" style="border-color:rgba(0,191,255,0.2)">
+        <div class="pc-tag" style="color:var(--blue)">BTC/USD</div>
+        <div class="pc-price">$68,240</div>
+        <div class="pc-sub">Bitcoin · Crypto</div>
+        <div class="pc-change up">▲ +2.3%</div>
+      </div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--blue)">◆ Today's Best Opportunities</div>
+    ${makeStockRow('INFY','Infosys','₹1,842','+1.2%',true,'BUY','Short term — AI revenue 34% YoY')}
+    ${makeStockRow('TATAPOWER','Tata Power','₹378','+0.4%',true,'HOLD','Long term — renewable energy play')}
+    ${makeStockRow('DIXON','Dixon Tech','₹9,210','+2.1%',true,'BUY','Apple & Samsung contracts locked in')}
+    ${makeStockRow('HDFCBANK','HDFC Bank','₹1,527','+0.8%',true,'BUY','Post-merger stable, FII buying')}
+    </div>`,
+    why:()=>`<div class="card-label" style="color:var(--blue)">◆ Why markets moved today</div>
+    ${makeWhyCard('🌍','FII Buying ₹4,200 Cr','Foreign money flowing into India','BULLISH','Foreign Institutional Investors are net buyers for the 2nd straight week. When FII flows are positive, it means global money managers see India as a good bet — they\'re buying Indian stocks, pushing prices up. This is THE biggest short-term driver of Sensex direction.')}
+    ${makeWhyCard('💰','US Fed Rate Cut Signals','Dollar weakening benefits India','BULLISH','Two Fed rate cuts in 2025 make US bonds less attractive. Money rotates into emerging markets. India is the top destination — strong GDP, political stability, massive market. Every 0.25% Fed cut = ~₹1,000-2,000 Cr of FII inflow to India historically.')}
+    ${makeWhyCard('📊','Strong Q3 Results Season','Indian corporates beating estimates','BULLISH','70% of Nifty 50 companies beat Q3 earnings estimates. IT sector strong on AI contracts. Banking sector: loan growth 14% YoY. Auto sector: record sales. Good earnings = stocks go up. Simple.')}`,
+    forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Market Targets 2025</div>
+    <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
+    ${makeFT('Mar 2025','Sensex: 74,000–76,000','Nifty: 22,500','','','RBI rate cut likely — positive for banks and NBFCs. Q4 results season begins.',75,true)}
+    ${makeFT('Jun 2025','Sensex: 78,000–82,000','Nifty: 23,500–25,000','','','Fed cuts rates in June — FII inflows surge. Monsoon forecast critical for rural stocks.',68,false)}
+    ${makeFT('Dec 2025','Sensex: 82,000–90,000','Nifty: 25,000–27,000','','','Full year: +15% to +25% return expected. Best performing sectors: IT, Banking, Renewable Energy, Defence.',60,false)}
+    </div></div>`,
+    questions:[
+      {q:"You invest ₹5,000/month in a Nifty 50 index fund starting today. In 15 years at 13% average annual return, roughly how much will you have?",ctx:"💡 This tests your understanding of SIP (Systematic Investment Plan) and compound interest — the most powerful concept in personal finance.",
+       opts:["₹9 lakhs (just what you put in)","₹22 lakhs (slightly more than invested)","₹1.2 crores (power of compounding)","₹5 crores (unrealistic)"],
+       ans:2,xp:60,explain:"✅ At 13% annualized returns (Nifty 50's historical average), ₹5,000/month for 15 years → ~₹1.2 crore. You invested only ₹9 lakh. The other ₹1.1 crore is PURE compounding. This is why starting a SIP at 22 vs 32 means the difference between ₹1.2 crore and ₹45 lakh at retirement. Start TODAY."},
+    ],
+    learn:[
+      {icon:'📈',title:'SIP: The Most Powerful Habit in Finance',sub:'How ₹5,000/month becomes ₹1 crore',badge:'Beginner',
+       body:`<h3>What is a SIP?</h3>SIP (Systematic Investment Plan) means automatically investing a fixed amount every month into a mutual fund — regardless of whether markets are up or down. Set it, forget it, get rich slowly.
+       <h3>The Magic of Rupee Cost Averaging</h3>When markets are down → your ₹5,000 buys MORE units. When markets are up → your units are worth more. Over time, you automatically buy cheap and profit on the way up. No timing needed.
+       <h3>The Numbers</h3>₹5,000/month × 15 years × 13% = ₹1.2 crore<br>₹5,000/month × 20 years × 13% = ₹2.6 crore<br>₹5,000/month × 30 years × 13% = ₹9.4 crore
+       <div class="example-box">🚀 <strong>Start in 5 minutes:</strong> Open Groww or Zerodha → search "Nifty 50 Index Fund" → set up ₹500/month SIP. Increase by 10% every year as your income grows. That's it. You've done more for your future than most Indians ever will.</div>`},
+    ]
+  },
+
+  science:{name:'🧬 Science Arena',sub:'Space · Physics · Biology · Discovery',color:'#ff4560',
+    live:()=>`<div class="card-label" style="color:var(--red)">◆ Science This Week</div>
+    <div class="card">
+    ${makeNewsItem('🚀','SpaceX Starship Flight 7 — booster caught again','2nd consecutive successful tower catch','SPACE')}
+    ${makeNewsItem('🧬','CRISPR cures genetic deafness in clinical trial','Gene editing restores hearing in 5 patients','BIO')}
+    ${makeNewsItem('🌙','India\'s ISRO Gaganyaan mission on track for 2025','First Indian human spaceflight approaching','INDIA')}
+    ${makeNewsItem('🧠','Neuralink patient plays chess with brain implant','Paralyzed man controls computer by thinking','NEURO')}
+    ${makeNewsItem('☀️','Fusion energy: NIF achieves Q>1 again','More energy out than in — 3rd consecutive success','ENERGY')}
+    </div>`,
+    why:()=>`<div class="card-label" style="color:var(--red)">◆ Why these discoveries matter to you</div>
+    ${makeWhyCard('🚀','Starship — Fully Reusable Rockets','Cost to space drops 100x','BULLISH','SpaceX\'s Starship aims to reduce launch costs from $10,000/kg to $100/kg. This makes space commercially viable — satellite internet (Starlink), space manufacturing, moon mining. Indian companies like Skyroot and Agnikul are riding this wave.')}
+    ${makeWhyCard('🧬','CRISPR Gene Editing','We can now rewrite DNA errors','BULLISH','CRISPR lets scientists edit genes like editing text. Curing hereditary blindness, sickle cell disease, certain cancers. India has 300M+ people with genetic diseases — this technology could affect millions of lives here within a decade.')}
+    ${makeWhyCard('☀️','Fusion Energy Progress','Unlimited clean energy on horizon','BULLISH','Fusion is how the sun generates energy — hydrogen atoms fuse, releasing massive energy with zero radiation waste. Q>1 means we got more energy out than we put in. Commercial fusion by 2035 could mean electricity too cheap to meter. India would benefit enormously.')}`,
+    forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Science Horizon</div>
+    <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
+    ${makeFT('2025','Gaganyaan launches','India joins elite space nations','','','ISRO\'s first human spaceflight. Strategic + scientific milestone. Boosts India\'s space sector employment and global prestige.',90,true)}
+    ${makeFT('2026–28','CRISPR therapies approved','Genetic diseases curable','','','India-specific genetic diseases (thalassemia, sickle cell) likely first targets. Government funding accelerating.',70,false)}
+    ${makeFT('2030–35','Fusion electricity possible','Energy becomes abundant','','','India investing in fusion research. If successful, eliminates energy insecurity permanently — transformational for a country importing 85% of oil.',50,false)}
+    </div></div>`,
+    questions:[
+      {q:"Fusion energy achieves Q>1 — getting more energy OUT than put IN. Why is this a big deal?",ctx:"💡 Fusion is how the sun works — hydrogen atoms merge to release enormous energy. Unlike nuclear fission (current nuclear plants), fusion produces no long-lived radioactive waste.",
+       opts:["It makes bombs more powerful","It could provide unlimited clean energy with no carbon emissions or nuclear waste","It gives unlimited internet speed","It makes computers faster"],
+       ans:1,xp:50,explain:"✅ Fusion energy could solve humanity's energy crisis permanently. The fuel is hydrogen (from water) — virtually infinite supply. The output is helium — harmless. No carbon emissions, no nuclear waste, no fuel scarcity. Q>1 means we've proven it works energetically. Scaling it up is the engineering challenge remaining."},
+    ],
+    learn:[
+      {icon:'🧬',title:'CRISPR: The DNA Editor',sub:'How scientists are rewriting life',badge:'Beginner',
+       body:`<h3>What is DNA?</h3>DNA is the instruction manual for every cell in your body — 3 billion letters of code (A, T, G, C). Errors in this code cause genetic diseases — cancer, diabetes, blindness, sickle cell, etc.
+       <h3>What is CRISPR?</h3>CRISPR (Cas9) is a molecular "find and replace" tool. You program it with the faulty DNA sequence → it finds it in the cell → cuts it out → the cell repairs itself with a corrected version. Like fixing a typo in a document.
+       <h3>Why India Should Care</h3>India has 300M+ people with genetic disorders — the highest in the world due to large population and historical patterns. Sickle cell disease affects 20M Indians. Thalassemia: 45 million carriers. CRISPR therapies could treat millions.
+       <div class="example-box">💰 <strong>Investment angle:</strong> Global genomics and biotech companies developing CRISPR therapies are worth watching. India's biotech sector (Sun Pharma, Biocon, Dr. Reddy's) are investing in gene therapy. Long-term 10-20 year bet.</div>`},
+    ]
+  }
+};
+
+// ═══════════════════════════════════════
+// RENDER HELPERS
+// ═══════════════════════════════════════
+function makeWhyCard(icon,title,sub,impact,body){
+  const cls=impact==='BULLISH'?'imp-bull':impact==='BEARISH'?'imp-bear':'imp-neut';
+  return `<div class="why-card" onclick="toggleWhy(this)">
+    <div class="why-front">
+      <div class="why-icon">${icon}</div>
+      <div class="why-mid"><div class="why-title">${title}</div><div class="why-sub">${sub}</div></div>
+      <div class="why-impact ${cls}">${impact}</div>
+      <div class="why-chevron">▾</div>
+    </div>
+    <div class="why-body">${body}</div>
+  </div>`;
+}
+
+function makeFT(period,price,sub,pct,up,reason,conf,now){
+  const chgColor=up===true?'var(--green)':up===false?'var(--red)':'var(--muted)';
+  return `<div class="ft-item">
+    <div class="ft-dot${now?' now':''}"></div>
+    <div class="ft-period">${period}</div>
+    <div class="ft-price-row">
+      <div class="ft-price">${price}</div>
+      ${pct?`<div class="ft-chg" style="color:${chgColor}">${up?'▲':'▼'} ${pct}</div>`:''}
+    </div>
+    ${sub?`<div style="font-family:var(--ffm);font-size:11px;color:var(--muted);margin-bottom:4px">${sub}</div>`:''}
+    <div class="ft-reason">${reason}</div>
+    <div class="ft-conf-row">
+      <div class="ft-cbar"><div class="ft-cfill" style="width:0%" data-w="${conf}"></div></div>
+      <div class="ft-clabel">Confidence: ${conf}%</div>
+    </div>
+  </div>`;
+}
+
+function makeNewsItem(icon,title,sub,tag){
+  return `<div style="display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);align-items:flex-start">
+    <div style="font-size:22px;flex-shrink:0;padding-top:2px">${icon}</div>
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:700;margin-bottom:3px;color:var(--text)">${title}</div>
+      <div style="font-size:11px;color:var(--muted)">${sub}</div>
+    </div>
+    <div style="font-family:var(--ffm);font-size:9px;letter-spacing:0.1em;color:var(--muted);padding:2px 6px;background:var(--dim);border-radius:4px;flex-shrink:0">${tag}</div>
+  </div>`;
+}
+
+function makeStockRow(sym,name,price,chg,up,badge,reason){
+  const bc=badge==='BUY'?'background:rgba(0,230,118,0.08);color:var(--green);border:1px solid rgba(0,230,118,0.3)':'background:rgba(0,191,255,0.08);color:var(--blue);border:1px solid rgba(0,191,255,0.3)';
+  return `<div style="display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--border)">
+    <div style="flex:1">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-family:var(--ffm);font-size:13px;font-weight:700;color:var(--blue)">${sym}</span>
+        <span style="font-family:var(--ffm);font-size:9px;padding:2px 7px;border-radius:4px;${bc}">${badge}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${name} · ${reason}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0">
+      <div style="font-family:var(--ffm);font-size:13px;font-weight:700">${price}</div>
+      <div style="font-family:var(--ffm);font-size:11px;color:${up?'var(--green)':'var(--red)'}">${up?'▲':'▼'} ${chg}</div>
+    </div>
+  </div>`;
+}
+
+// ═══════════════════════════════════════
+// GAME ENGINE
+// ═══════════════════════════════════════
+let gState={q:0,score:0,streak:0,correct:0,answered:false,done:false};
+let gQuestions=[];
+
+function buildGame(){
+  gState={q:0,score:0,streak:0,correct:0,answered:false,done:false};
+  gQuestions=[...ARENAS[S.currentArena].questions];
+  renderQ();
+}
+
+function renderQ(){
+  const el=document.getElementById('game-content');
+  if(gState.q>=gQuestions.length){showSummary();return;}
+  const q=gQuestions[gState.q];
+  const letters=['A','B','C','D'];
+  el.innerHTML=`
+    <div class="game-wrap" style="position:relative">
+      <div class="game-hud">
+        <div class="hud-item hud-score"><div class="hud-val" id="hud-score">${gState.score}</div><div class="hud-label">SCORE</div></div>
+        <div class="hud-item"><div class="hud-val" style="color:var(--text)">${gState.q+1}/${gQuestions.length}</div><div class="hud-label">QUESTION</div></div>
+        <div class="hud-item hud-streak"><div class="hud-val" id="hud-streak">${gState.streak}🔥</div><div class="hud-label">STREAK</div></div>
+        <div class="hud-item hud-acc"><div class="hud-val" id="hud-acc">${gState.q>0?Math.round(gState.correct/gState.q*100):100}%</div><div class="hud-label">ACCURACY</div></div>
+      </div>
+      <div class="game-q-num">Question ${gState.q+1} of ${gQuestions.length} · +${q.xp} XP</div>
+      <div class="game-q">${q.q}</div>
+      <div class="game-context">${q.ctx}</div>
+      <div class="opts-grid" id="opts-grid">
+        ${q.opts.map((o,i)=>`
+          <button class="opt-btn" onclick="answerQ(${i})">
+            <div class="opt-letter">${letters[i]}</div>
+            <span>${o}</span>
+          </button>`).join('')}
+      </div>
+      <div class="game-result" id="game-result"></div>
+      <div style="position:relative">
+        <button class="next-q-btn" id="next-btn" onclick="nextQ()">Next Question →</button>
+        <span class="xp-pop" id="xp-pop"></span>
+      </div>
+    </div>
+    <div class="score-summary" id="score-summary"></div>`;
+}
+
+function answerQ(chosen){
+  if(gState.answered) return;
+  gState.answered=true;
+  const q=gQuestions[gState.q];
+  const opts=document.querySelectorAll('.opt-btn');
+  const isRight=chosen===q.ans;
+  opts.forEach((b,i)=>{
+    b.disabled=true;
+    if(i===q.ans) b.classList.add('correct');
+    else if(i===chosen && !isRight) b.classList.add('wrong');
+  });
+  const res=document.getElementById('game-result');
+  res.className='game-result show '+(isRight?'right':'wrong');
+  res.innerHTML=(isRight?'✅ ':'❌ ')+q.explain;
+  if(isRight){
+    gState.score+=q.xp; gState.correct++; gState.streak++;
+    S.totalCorrect++; addXP(q.xp);
+    const pop=document.getElementById('xp-pop');
+    pop.textContent=`+${q.xp} XP`; pop.classList.add('fire');
+    setTimeout(()=>pop.classList.remove('fire'),1100);
+    document.getElementById('hud-score').textContent=gState.score;
+    document.getElementById('hud-streak').textContent=gState.streak+'🔥';
+  } else {
+    gState.streak=0;
+    document.getElementById('hud-streak').textContent='0🔥';
+  }
+  document.getElementById('hud-acc').textContent=
+    Math.round(gState.correct/(gState.q+1)*100)+'%';
+  document.getElementById('next-btn').classList.add('show');
+}
+
+function nextQ(){
+  gState.q++; gState.answered=false;
+  if(gState.q>=gQuestions.length) showSummary(); else renderQ();
+}
+
+function showSummary(){
+  const el=document.getElementById('game-content');
+  const pct=Math.round(gState.correct/gQuestions.length*100);
+  const trophy=pct===100?'🏆':pct>=80?'🥇':pct>=60?'🥈':pct>=40?'🥉':'😅';
+  const msg=pct===100?'PERFECT! Flawless!':pct>=80?'Excellent work!':pct>=60?'Good job! Keep learning.':pct>=40?'Not bad, review the lessons.':'Review the Learn tab!';
+  saveState();
+  el.innerHTML=`
+    <div class="score-summary show">
+      <div class="ss-trophy">${trophy}</div>
+      <div class="ss-title">${msg}</div>
+      <div class="ss-sub">${gState.correct}/${gQuestions.length} correct · ${gState.score} XP earned today</div>
+      <div class="ss-grid">
+        <div class="ss-stat"><div class="ss-val">${gState.score}</div><div class="ss-label">XP Earned</div></div>
+        <div class="ss-stat"><div class="ss-val">${pct}%</div><div class="ss-label">Accuracy</div></div>
+        <div class="ss-stat"><div class="ss-val">${gState.streak}🔥</div><div class="ss-label">Best Streak</div></div>
+      </div>
+      <button class="replay-btn" onclick="buildGame()">🔄 Play Again</button>
+    </div>`;
+}
+
+// ═══════════════════════════════════════
+// XP & LEVELS
+// ═══════════════════════════════════════
+function addXP(amount){
+  S.xp+=amount; S.arenaXP+=amount;
+  const newLevel=Math.floor(S.xp/XP_PER_LEVEL)+1;
+  if(newLevel>S.level){
+    S.level=newLevel;
+    showLevelUp(`You reached Level ${S.level}`);
+  }
+  updateXPBar(); saveState();
+  document.getElementById('arena-xp-display').textContent=`+${S.arenaXP} XP today`;
+}
+
+function updateXPBar(){
+  const pct=((S.xp%XP_PER_LEVEL)/XP_PER_LEVEL)*100;
+  document.getElementById('xp-fill').style.width=pct+'%';
+  document.getElementById('xp-val').textContent=S.xp;
+  document.getElementById('lv-num').textContent=S.level;
+  document.getElementById('str-num').textContent=S.streak;
+}
+
+function showLevelUp(msg){
+  const t=document.getElementById('lvl-toast');
+  document.getElementById('lt-sub').textContent=msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),3000);
+}
+
+function showLvlModal(){
+  const needed=(XP_PER_LEVEL-(S.xp%XP_PER_LEVEL));
+  openLesson('⚡','Your Progress',
+    `<h3>Current Status</h3><strong>Level ${S.level}</strong> · ${S.xp} total XP<br>Need <strong>${needed} more XP</strong> to reach Level ${S.level+1}.
+    <h3>How to Earn XP</h3>• Correct quiz answer: +40–70 XP<br>• Visiting a new arena: +20 XP<br>• Completing daily quest: +150 XP<br>• Daily streak bonus: +${S.streak*10} XP (current)
+    <h3>Levels & Titles</h3>• Level 1–3: Curious Beginner 🌱<br>• Level 4–7: Informed Citizen 📰<br>• Level 8–12: Market Aware 📊<br>• Level 13–20: World Analyst 🌍<br>• Level 21+: Intelligence Master 🧠`);
+}
+
+function showStreakInfo(){
+  const msgs=['','Just getting started!','2 days in. Build the habit.','3 days — you\'re forming a real habit!','4 days — stronger than 80% of people.','5 days — almost a full week!','6 days — incredible consistency!','A FULL WEEK! You\'re a WORLD IQ warrior.'];
+  const msg=msgs[Math.min(S.streak,msgs.length-1)]||`${S.streak} days and counting. Legendary.`;
+  openLesson('🔥',`${S.streak} Day Streak!`,
+    `<h3>Your Streak</h3>You've used WORLD IQ for <strong>${S.streak} consecutive day${S.streak>1?'s':''}.</strong><br><br>${msg}
+    <h3>Why Streaks Matter</h3>Neuroscience shows it takes 21 days to form a habit and 66 days to make it automatic. Every day you open WORLD IQ, you're literally rewiring your brain to seek knowledge instead of dopamine from mindless scrolling.
+    <div class="example-box">🏆 <strong>Streak rewards:</strong> 7 days = "On Fire" badge · 30 days = "Scholar" badge · 100 days = "World IQ Master" badge. Keep going!</div>`);
+}
+
+function showAchieve(title,desc){
+  openLesson('🏆',title,`<p>${desc}</p>`);
+}
+
+// ═══════════════════════════════════════
+// NAVIGATION
+// ═══════════════════════════════════════
+let currentInner=0;
+
+function openArena(id){
+  S.currentArena=id;
+  S.arenaXP=0;
+  const a=ARENAS[id];
+  document.getElementById('homescreen').style.display='none';
+  document.getElementById('arenascreen').style.display='block';
+  document.getElementById('arena-top-name').textContent=a.name;
+  document.getElementById('arena-top-sub').textContent=a.sub;
+  document.getElementById('arena-xp-display').textContent='+0 XP today';
+  switchInner(0);
+  // visit bonus
+  if(!S.visitedArenas.has(id)){
+    S.visitedArenas.add(id);
+    addXP(20);
+    updateQuest();
+  }
+  window.scrollTo(0,0);
+}
+
+function goHome(){
+  document.getElementById('arenascreen').style.display='none';
+  document.getElementById('homescreen').style.display='block';
+  window.scrollTo(0,0);
+}
+
+function switchInner(i){
+  currentInner=i;
+  document.querySelectorAll('.itab').forEach((t,j)=>t.classList.toggle('active',j===i));
+  document.querySelectorAll('.ipanel').forEach((p,j)=>p.classList.toggle('active',j===i));
+  const a=ARENAS[S.currentArena];
+  if(i===0) document.getElementById('live-content').innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px">${a.live()}</div>`;
+  if(i===1) document.getElementById('why-content').innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px">${a.why()}</div>`;
+  if(i===2){document.getElementById('forecast-content').innerHTML=a.forecast();setTimeout(animConf,300);}
+  if(i===3){buildGame();}
+  if(i===4) buildLearn();
+  if(i===0) setTimeout(drawChart,100);
+}
+
+function toggleWhy(el){
+  el.classList.toggle('open');
+}
+
+// ═══════════════════════════════════════
+// LEARN TAB
+// ═══════════════════════════════════════
+function buildLearn(){
+  const lessons=ARENAS[S.currentArena].learn;
+  document.getElementById('learn-content').innerHTML=
+    `<div class="learn-grid">${lessons.map(l=>`
+      <div class="learn-card" onclick='openLesson("${l.icon}","${l.title}",\`${l.body.replace(/`/g,'\\`')}\`)'>
+        <div class="lc-icon">${l.icon}</div>
+        <div class="lc-title">${l.title}</div>
+        <div class="lc-sub">${l.sub}</div>
+        <div class="lc-badge">${l.badge}</div>
+      </div>`).join('')}
+    </div>
+    <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.15);border-radius:14px;padding:16px;text-align:center">
+      <div style="font-size:24px;margin-bottom:8px">🧠</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:4px">More lessons unlocking</div>
+      <div style="font-size:12px;color:var(--muted)">Complete quizzes to unlock advanced lessons and earn XP</div>
+    </div>`;
+}
+
+function openLesson(icon,title,body){
+  document.getElementById('lb-icon').textContent=icon;
+  document.getElementById('lb-title').textContent=title;
+  document.getElementById('lb-body').innerHTML=body;
+  document.getElementById('lesson-modal').classList.add('show');
+}
+function closelesson(){document.getElementById('lesson-modal').classList.remove('show')}
+
+// ═══════════════════════════════════════
+// CHART
+// ═══════════════════════════════════════
+function generatePriceData(base,vol,days){
+  const d=[];let v=base;
+  for(let i=0;i<days;i++){v+=v*(Math.random()-0.48)*vol;d.push(Math.max(v*0.85,v));}
+  return d;
+}
+
+function drawChart(){
+  const canvas=document.getElementById('priceChart');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+  const W=canvas.offsetWidth; const H=180;
+  canvas.width=W*devicePixelRatio; canvas.height=H*devicePixelRatio;
+  ctx.scale(devicePixelRatio,devicePixelRatio);
+  const goldData=generatePriceData(61000,0.012,30);
+  const silverData=generatePriceData(7200,0.018,30).map(v=>v/10);
+  function drawLine(data,color,gStart,gEnd){
+    const min=Math.min(...data),max=Math.max(...data),range=max-min||1;
+    const pts=data.map((v,i)=>({x:i/(data.length-1)*(W-20)+10,y:H-20-((v-min)/range)*(H-40)}));
+    const grad=ctx.createLinearGradient(0,0,0,H);
+    grad.addColorStop(0,gStart); grad.addColorStop(1,gEnd);
+    ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    const pathCopy=new Path2D(); pts.forEach((p,i)=>i?pathCopy.lineTo(p.x,p.y):pathCopy.moveTo(p.x,p.y));
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke();
+    ctx.lineTo(pts[pts.length-1].x,H-10); ctx.lineTo(pts[0].x,H-10); ctx.closePath();
+    ctx.fillStyle=grad; ctx.fill();
+  }
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=1;
+  for(let i=0;i<4;i++){const y=20+i*(H-40)/3;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  drawLine(goldData,'#f5c842','rgba(245,200,66,0.18)','rgba(245,200,66,0)');
+  drawLine(silverData,'#c8d8ee','rgba(200,216,238,0.1)','rgba(200,216,238,0)');
+}
+
+function switchRange(btn,range){
+  document.querySelectorAll('.rb').forEach(b=>b.classList.remove('act'));
+  btn.classList.add('act');
+  drawChart();
+}
+
+function animConf(){
+  document.querySelectorAll('.ft-cfill[data-w]').forEach(el=>{
+    el.style.width=el.getAttribute('data-w')+'%';
+  });
+}
+
+// ═══════════════════════════════════════
+// QUEST
+// ═══════════════════════════════════════
+function updateQuest(){
+  const count=Math.min(S.visitedArenas.size,2);
+  sessionStorage.setItem('wiq_quest',count);
+  const el=document.getElementById('quest-count');
+  if(el) el.textContent=count;
+  const pct=count/2*100;
+  const fill=document.getElementById('quest-fill');
+  if(fill) fill.style.width=pct+'%';
+  const pctEl=document.getElementById('quest-pct');
+  if(pctEl) pctEl.textContent=pct+'%';
+  if(count>=2 && !sessionStorage.getItem('wiq_quest_done')){
+    sessionStorage.setItem('wiq_quest_done','1');
+    addXP(150);
+    showLevelUp('Daily Quest Complete! +150 XP');
+  }
+}
+
+// ═══════════════════════════════════════
+// CLOCK
+// ═══════════════════════════════════════
+function updateClock(){
+  const now=new Date();
+  document.getElementById('topbar-clock').textContent=
+    now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  const h=now.getHours();
+  const el=document.getElementById('home-greeting');
+  if(el) el.textContent=h<12?'☀️ Good Morning':h<17?'🌤 Good Afternoon':'🌙 Good Evening';
+}
+setInterval(updateClock,1000); updateClock();
+
+// ═══════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════
+updateXPBar();
+updateQuest();
+window.addEventListener('resize',()=>{if(document.getElementById('priceChart'))drawChart();});
+</script>
+</body>
+</html>
