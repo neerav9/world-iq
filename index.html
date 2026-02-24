@@ -1864,24 +1864,51 @@ function toggleWhy(el){
 // ═══════════════════════════════════════
 // LEARN TAB
 // ═══════════════════════════════════════
-function buildLearn(){
-  const lessons=ARENAS[S.currentArena].learn;
-  // Store lesson bodies in a temp array to avoid inline escaping hell
+function buildLearn() {
+  const lessons = ARENAS[S.currentArena].learn;
+  const container = document.getElementById('learn-content');
+
+  // Store bodies safely
   window._learnBodies = lessons.map(l => l.body);
-  document.getElementById('learn-content').innerHTML=
-    `<div class="learn-grid">${lessons.map((l,idx)=>`
-      <div class="learn-card" onclick="openLesson('${l.icon.replace(/'/g,"\\'")}','${l.title.replace(/'/g,"\\'")}',window._learnBodies[${idx}])">
-        <div class="lc-icon">${l.icon}</div>
-        <div class="lc-title">${l.title}</div>
-        <div class="lc-sub">${l.sub}</div>
-        <div class="lc-badge">${l.badge}</div>
-      </div>`).join('')}
+
+  // Build HTML safely (no inline JS)
+  container.innerHTML = `
+    <div class="learn-grid">
+      ${lessons.map((l, idx) => `
+        <div class="learn-card" data-lesson-index="${idx}">
+          <div class="lc-icon">${l.icon}</div>
+          <div class="lc-title">${l.title}</div>
+          <div class="lc-sub">${l.sub}</div>
+          <div class="lc-badge">${l.badge}</div>
+        </div>
+      `).join('')}
     </div>
-    <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.15);border-radius:14px;padding:16px;text-align:center">
+
+    <div style="
+      background:rgba(124,58,237,0.06);
+      border:1px solid rgba(124,58,237,0.15);
+      border-radius:14px;
+      padding:16px;
+      text-align:center;
+    ">
       <div style="font-size:24px;margin-bottom:8px">🧠</div>
-      <div style="font-size:14px;font-weight:700;margin-bottom:4px">More lessons unlocking</div>
-      <div style="font-size:12px;color:var(--muted)">Complete quizzes to unlock advanced lessons and earn XP</div>
-    </div>`;
+      <div style="font-size:14px;font-weight:700;margin-bottom:4px">
+        More lessons unlocking
+      </div>
+      <div style="font-size:12px;color:var(--muted)">
+        Complete quizzes to unlock advanced lessons and earn XP
+      </div>
+    </div>
+  `;
+
+  // Attach click listeners safely
+  document.querySelectorAll('.learn-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const idx = card.dataset.lessonIndex;
+      const lesson = lessons[idx];
+      openLesson(lesson.icon, lesson.title, window._learnBodies[idx]);
+    });
+  });
 }
 
 function openLesson(icon,title,body){
