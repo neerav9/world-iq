@@ -466,26 +466,68 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 </div>
 
 <!-- TOPBAR -->
-<div id="topbar">
-  <div class="tb-logo">WORLD IQ</div>
+<div id="topbar" style="display:none;">
+  <!-- LEFT: Logo + Username -->
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div class="tb-logo">WORLD IQ</div>
+    <div id="tb-username" style="
+      font-size:11px;
+      color:var(--muted);
+      font-family:var(--ffm);
+      letter-spacing:0.08em;
+    ">
+      Guest
+    </div>
+  </div>
+
+  <!-- CENTER: XP -->
   <div class="tb-mid">
     <div class="xp-wrap">
       <div class="xp-label">XP</div>
-      <div class="xp-bar"><div class="xp-fill" id="xp-fill" style="width:0%"></div></div>
+      <div class="xp-bar">
+        <div class="xp-fill" id="xp-fill" style="width:0%"></div>
+      </div>
       <div class="xp-val" id="xp-val">0</div>
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:8px">
+
+  <!-- RIGHT: Level + Streak + Clock + Logout -->
+  <div style="display:flex;align-items:center;gap:10px">
+
     <div class="level-badge" onclick="showLvlModal()">
       <span class="lv-icon">⚡</span>
       <span class="lv-num" id="lv-num">1</span>
       <span class="lv-label">LVL</span>
     </div>
+
     <div class="streak-badge" onclick="showStreakInfo()">
       <span class="str-fire">🔥</span>
       <span class="str-num" id="str-num">1</span>
     </div>
-    <div id="topbar-clock"></div>
+
+    <div id="topbar-clock" style="
+      font-family:var(--ffm);
+      font-size:10px;
+      color:var(--muted);
+    "></div>
+
+    <!-- LOGOUT BUTTON -->
+    <button onclick="logout()" style="
+      padding:6px 12px;
+      border-radius:8px;
+      border:1px solid var(--border);
+      background:var(--card2);
+      color:var(--text);
+      font-family:var(--ffm);
+      font-size:10px;
+      letter-spacing:0.08em;
+      cursor:pointer;
+      transition:all 0.2s;
+    " onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)';"
+      onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text)';">
+      LOGOUT
+    </button>
+
   </div>
 </div>
 
@@ -764,6 +806,7 @@ console.log("   SUPABASE_ANON_KEY length:", SUPABASE_ANON_KEY.length);
 // ═══════════════════════════════════════
 // SUPABASE INITIALIZATION WITH RETRY LOGIC
 // ═══════════════════════════════════════
+
 function initSupabase() {
   try {
     if (!window.supabase || !window.supabase.createClient) {
@@ -784,11 +827,13 @@ initSupabase();
 function showAuth() {
   document.getElementById("auth-screen").style.display = "flex";
   document.getElementById("homescreen").style.display = "none";
+  document.getElementById("topbar").style.display = "none"; // 🔥 add this
 }
 
 function showApp() {
   document.getElementById("auth-screen").style.display = "none";
   document.getElementById("homescreen").style.display = "block";
+  document.getElementById("topbar").style.display = "flex"; // 🔥 add this
 }
 
 // ═══════════════════════════════════════
@@ -1652,7 +1697,22 @@ async function login() {
     alert("Login failed. Check console for details.");
   }
 }
+async function logout() {
+  if (window.supabaseClient) {
+    await window.supabaseClient.auth.signOut();
+  }
 
+  localStorage.clear();
+  sessionStorage.clear();
+
+  // Reset UI values
+  document.getElementById("xp-val").innerText = "0";
+  document.getElementById("lv-num").innerText = "1";
+  document.getElementById("str-num").innerText = "1";
+  document.getElementById("tb-username").innerText = "Guest";
+
+  showAuth();
+}
 function initApp() {
   showApp();
   updateXPBar();
