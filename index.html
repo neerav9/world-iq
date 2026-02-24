@@ -596,7 +596,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       font-family: var(--ff);
     ">
 
-    <button type="button" onclick="signup()" style="
+    <button id="signup-btn" type="button" onclick="signup()" style="display:block;
       width:100%;
       padding:12px;
       margin-bottom:10px;
@@ -612,7 +612,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       CREATE ACCOUNT
     </button>
 
-    <button type="button" onclick="login()" style="
+    <button id="login-btn" type="button" onclick="login()" style="display:none;
       width:100%;
       padding:12px;
       border-radius:12px;
@@ -842,10 +842,14 @@ initSupabase();
 
 function switchToLogin() {
   document.getElementById("username").style.display = "none";
+  document.getElementById("signup-btn").style.display = "none";
+  document.getElementById("login-btn").style.display = "block";
 }
 
 function switchToSignup() {
   document.getElementById("username").style.display = "block";
+  document.getElementById("signup-btn").style.display = "block";
+  document.getElementById("login-btn").style.display = "none";
 }
 // ═══════════════════════════════════════
 // UI STATE MANAGEMENT
