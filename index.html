@@ -892,11 +892,19 @@ const S = {
 };
 
 const XP_PER_LEVEL = 200;
+async function saveState() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return;
 
-function saveState(){
-  localStorage.setItem('wiq_xp', S.xp);
-  localStorage.setItem('wiq_level', S.level);
-  localStorage.setItem('wiq_correct', S.totalCorrect);
+  await supabaseClient
+    .from('profiles')
+    .update({
+      xp: S.xp,
+      level: S.level,
+      streak: S.streak,
+      total_correct: S.totalCorrect
+    })
+    .eq('user_id', user.id);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -908,7 +916,7 @@ function saveState(){
 
 const CACHE_TTL_PRICES = 30 * 60 * 1000;   // 30 min
 const CACHE_TTL_NEWS   = 60 * 60 * 1000;   // 60 min
-const USD_TO_INR = 83.5; // approximate — updated via API below
+// approximate — updated via API below
 
 // ── Utility: cache with TTL ──────────────────────────────
 function cacheSet(key, data, ttl) {
@@ -947,7 +955,29 @@ async function getMetalPrices() {
     return cacheGet('dyn_metals') || { gold: 2034, silver: 22.8, palladium: 1000, platinum: 950 };
   }
 }
+// ═══════════════════════════════════════
+// USD → INR Exchange Rate (Dynamic)
+// ═══════════════════════════════════════
+async function getUsdInr() {
+  const cached = cacheGet('dyn_usdinr');
+  if (cached) return cached;
 
+  try {
+    const res = await fetch(
+      'https://api.exchangerate.host/latest?base=USD&symbols=INR',
+      { signal: AbortSignal.timeout(7000) }
+    );
+    const json = await res.json();
+    const rate = json.rates.INR;
+
+    cacheSet('dyn_usdinr', rate, CACHE_TTL_PRICES);
+    return rate;
+
+  } catch (e) {
+    console.warn('[WIQ] FX API failed', e);
+    return cacheGet('dyn_usdinr') || 83.5;
+  }
+}
 // ═══════════════════════════════════════
 // 2. STOCK QUOTES — Yahoo Finance (free, no key, via allorigins proxy)
 // Symbols: ^BSESN=Sensex, ^NSEI=Nifty, BTC-USD, NVDA, TCS.NS, INFY.NS
@@ -1123,15 +1153,10 @@ async function renderGoldLive(container) {
 
   setTimeout(drawChart, 100);
 
-  const metals = await getMetalPrices();
-  const goldUsd = metals.gold || 2034;
-  const silverUsd = metals.silver || 22.8;
-  const palladiumUsd = metals.palladium || 1000;
-  const platinumUsd = metals.platinum || 950;
+  const usdToInr = await getUsdInr();
 
-  const goldInr  = Math.round(goldUsd * USD_TO_INR / 31.1035 * 10);
-  const silverInr = Math.round(silverUsd * USD_TO_INR * 32.1507);
-  const gsRatio = (goldUsd / silverUsd).toFixed(1);
+const goldInr = Math.round(goldUsd * usdToInr / 31.1035 * 10);
+const silverInr = Math.round(silverUsd * usdToInr * 32.1507);
 
   // Determine trend
   const trend = goldUsd > 2000 ? 'BULL 🟢' : goldUsd > 1800 ? 'NEUTRAL 🟡' : 'BEAR 🔴';
@@ -2006,7 +2031,33 @@ setInterval(updateClock,1000); updateClock();
 updateXPBar();
 updateQuest();
 window.addEventListener('resize',()=>{if(document.getElementById('priceChart'))drawChart();});
+async function loadUserProfile(user) {
+  const { data, error } = await supabaseClient
+    .from('profiles')
+    .select('*')
+    .eq('user_id', user.id)
+    .single();
 
+  if (error && error.code === 'PGRST116') {
+    // Profile doesn't exist → create one
+    const { data: newProfile, error: insertError } = await supabaseClient
+      .from('profiles')
+      .insert([{
+        user_id: user.id,
+        username: user.email,
+        xp: 0,
+        level: 1,
+        streak: 1,
+        total_correct: 0
+      }])
+      .select()
+      .single();
+
+    if (!insertError) applyProfile(newProfile);
+  } else if (!error) {
+    applyProfile(data);
+  }
+}
 async function signup() {
   const username = document.getElementById("username").value;
   const email = document.getElementById("email").value;
