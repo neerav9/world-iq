@@ -827,13 +827,14 @@ initSupabase();
 function showAuth() {
   document.getElementById("auth-screen").style.display = "flex";
   document.getElementById("homescreen").style.display = "none";
-  document.getElementById("topbar").style.display = "none"; // 🔥 add this
+  document.getElementById("topbar").style.display = "none";
 }
 
-function showApp() {
+function showApp(username) {
   document.getElementById("auth-screen").style.display = "none";
   document.getElementById("homescreen").style.display = "block";
-  document.getElementById("topbar").style.display = "flex"; // 🔥 add this
+  document.getElementById("topbar").style.display = "flex";
+  document.getElementById("tb-username").innerText = username || "Player";
 }
 
 // ═══════════════════════════════════════
