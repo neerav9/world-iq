@@ -1866,9 +1866,11 @@ function toggleWhy(el){
 // ═══════════════════════════════════════
 function buildLearn(){
   const lessons=ARENAS[S.currentArena].learn;
+  // Store lesson bodies in a temp array to avoid inline escaping hell
+  window._learnBodies = lessons.map(l => l.body);
   document.getElementById('learn-content').innerHTML=
-    `<div class="learn-grid">${lessons.map(l=>`
-      <div class="learn-card" onclick='openLesson("${l.icon}","${l.title}",\`${l.body.replace(/`/g,'\\`')}\`)'>
+    `<div class="learn-grid">${lessons.map((l,idx)=>`
+      <div class="learn-card" onclick="openLesson('${l.icon.replace(/'/g,"\\'")}','${l.title.replace(/'/g,"\\'")}',window._learnBodies[${idx}])">
         <div class="lc-icon">${l.icon}</div>
         <div class="lc-title">${l.title}</div>
         <div class="lc-sub">${l.sub}</div>
