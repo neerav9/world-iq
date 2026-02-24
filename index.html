@@ -596,7 +596,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       font-family: var(--ff);
     ">
 
-    <button onclick="signup()" style="
+    <button type="button" onclick="signup()" style="
       width:100%;
       padding:12px;
       margin-bottom:10px;
@@ -612,7 +612,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
       CREATE ACCOUNT
     </button>
 
-    <button onclick="login()" style="
+    <button type="button" onclick="login()" style="
       width:100%;
       padding:12px;
       border-radius:12px;
@@ -626,6 +626,24 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     ">
       LOGIN
     </button>
+    <div style="
+  margin-top:18px;
+  font-size:11px;
+  color:var(--muted);
+  font-family:var(--ffm);
+">
+  Already have an account?
+  <span onclick="switchToLogin()" style="
+    color:var(--xp2);
+    cursor:pointer;
+  ">Login</span>
+  &nbsp;|&nbsp;
+  New user?
+  <span onclick="switchToSignup()" style="
+    color:var(--xp2);
+    cursor:pointer;
+  ">Register</span>
+</div>
   </div>
 </div>
 
@@ -821,6 +839,14 @@ function initSupabase() {
   }
 }
 initSupabase();
+
+function switchToLogin() {
+  document.getElementById("username").style.display = "none";
+}
+
+function switchToSignup() {
+  document.getElementById("username").style.display = "block";
+}
 // ═══════════════════════════════════════
 // UI STATE MANAGEMENT
 // ═════════════════════════════════════==
