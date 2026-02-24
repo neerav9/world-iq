@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>WORLD IQ — Gamified Intelligence</title>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Nunito:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:,">
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 :root{
@@ -14,7 +15,7 @@
   --gold:#f5c842;--gold2:#e8a020;--goldfaint:rgba(245,200,66,0.08);
   --silver:#c8d8ee;--silverfaint:rgba(200,216,238,0.07);
   --green:#00e676;--red:#ff4560;--blue:#00bfff;--orange:#ff8c42;
-  --ff:\'Nunito\',sans-serif;--ffm:\'JetBrains Mono\',monospace;--ffh:\'Rajdhani\',sans-serif;
+  --ff:'Nunito',sans-serif;--ffm:'JetBrains Mono',monospace;--ffh:'Rajdhani',sans-serif;
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--ff);overflow-x:hidden;-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
@@ -443,7 +444,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   .price-row{grid-template-columns:1fr}
 }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div class="orb orb1"></div>
@@ -743,17 +743,54 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    const SUPABASE_URL = "https://cnerthaoxsgawokaultj.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNuZXJ0aGFveHNnYXdva2F1bHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2ODI0MjEsImV4cCI6MjA4NzI1ODQyMX0.j59L0Q7j-nbIQSY_NS4c2_cqoB0lrNJkzbjvWIHhlPg";
+// ═══════════════════════════════════════
+// SUPABASE CONFIGURATION - GLOBAL SCOPE
+// ═══════════════════════════════════════
+const SUPABASE_URL = "https://cnerthaoxsgawokaultj.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNuZXJ0aGFveHNnYXdva2F1bHRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2ODI0MjEsImV4cCI6MjA4NzI1ODQyMX0.j59L0Q7j-nbIQSY_NS4c2_cqoB0lrNJkzbjvWIHhlPg";
 
-    const supabaseClient = supabase.createClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY
-    );
-  </script>
+// Immediate validation before anything else
+console.log("=== SUPABASE INITIALIZATION DEBUG ===");
+console.log("1. Constants defined:");
+console.log("   SUPABASE_URL type:", typeof SUPABASE_URL);
+console.log("   SUPABASE_URL value:", SUPABASE_URL);
+console.log("   SUPABASE_URL length:", SUPABASE_URL.length);
+console.log("   SUPABASE_URL starts with https://:", SUPABASE_URL.startsWith("https://"));
+console.log("   SUPABASE_ANON_KEY type:", typeof SUPABASE_ANON_KEY);
+console.log("   SUPABASE_ANON_KEY length:", SUPABASE_ANON_KEY.length);
 
-  <script>
+// ═══════════════════════════════════════
+// SUPABASE INITIALIZATION WITH RETRY LOGIC
+// ═══════════════════════════════════════
+function initSupabase() {
+  try {
+    if (!window.supabase || !window.supabase.createClient) {
+      throw new Error("Supabase library not loaded.");
+    }
+    window.supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    });
+    console.log("✅ Supabase initialized successfully.");
+  } catch (err) {
+    console.error("Supabase init error:", err);
+  }
+}
+initSupabase();
+// ═══════════════════════════════════════
+// UI STATE MANAGEMENT
+// ═════════════════════════════════════==
+function showAuth() {
+  document.getElementById("auth-screen").style.display = "flex";
+  document.getElementById("homescreen").style.display = "none";
+}
+
+function showApp() {
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("homescreen").style.display = "block";
+}
+
 // ═══════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════
@@ -1552,68 +1589,97 @@ async function signup() {
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
-  const { data, error } = await supabaseClient.auth.signUp({
-    email,
-    password,
-  });
-
-  if (error) {
-    alert(error.message);
+  if (!email || !password || !username) {
+    alert("Please fill all fields");
     return;
   }
 
-  const user = data.user;
+  if (!window.supabaseClient) {
+    alert("Supabase not initialized. Please refresh the page.");
+    console.error("window.supabaseClient is undefined");
+    return;
+  }
 
-  await supabaseClient.from("profiles").insert({
-    user_id: user.id,
-    username: username,
-  });
+  try {
+    const { data, error } = await window.supabaseClient.auth.signUp({
+      email,
+      password,
+    });
 
-  alert("Account created! Please login.");
+    if (error) {
+      console.error("Signup error:", error);
+      alert(`Error: ${error.message}`);
+      return;
+    }
+
+    alert("Account created! Please login.");
+  } catch (err) {
+    console.error("Signup exception:", err);
+    alert("Signup failed. Check console for details.");
+  }
 }
 
 async function login() {
   const email = document.getElementById("email").value;
   const password = document.getElementById("password").value;
 
-  const { error } = await supabaseClient.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (error) {
-    alert(error.message);
+  if (!email || !password) {
+    alert("Please fill all fields");
     return;
   }
 
-  initApp();
-}
-
-async function initApp() {
-  document.getElementById("auth-screen").style.display = "none";
-  document.getElementById("homescreen").style.display = "block";
-
-  const { data: { user } } = await supabaseClient.auth.getUser();
-
-  const { data } = await supabaseClient
-    .from("profiles")
-    .select("*")
-    .eq("user_id", user.id)
-    .single();
-
-  if (data) {
-    S.xp = data.xp;
-    S.level = data.level;
-    S.streak = data.streak;
-    S.totalCorrect = data.total_correct;
+  if (!window.supabaseClient) {
+    alert("Supabase not initialized. Please refresh the page.");
+    console.error("window.supabaseClient is undefined");
+    return;
   }
 
-  updateUI();
+  try {
+    const { error } = await window.supabaseClient.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      console.error("Login error:", error);
+      alert(`Error: ${error.message}`);
+      return;
+    }
+
+    showApp();
+  } catch (err) {
+    console.error("Login exception:", err);
+    alert("Login failed. Check console for details.");
+  }
 }
 
-supabaseClient.auth.getSession().then(({ data }) => {
-  if (data.session) {
-    initApp();
+function initApp() {
+  showApp();
+  updateXPBar();
+  updateQuest();
+  updateClock();
+}
+
+// ═══════════════════════════════════════
+// SESSION CHECK ON PAGE LOAD
+// ═══════════════════════════════════════
+document.addEventListener("DOMContentLoaded", async () => {
+  try {
+    if (!window.supabaseClient) {
+      console.warn("Supabase client not initialized");
+      showAuth();
+      return;
+    }
+
+    const { data } = await window.supabaseClient.auth.getSession();
+    if (data.session) {
+      initApp();
+    } else {
+      showAuth();
+    }
+  } catch (err) {
+    console.error("Session check error:", err);
+    showAuth();
   }
 });
 
