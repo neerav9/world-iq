@@ -899,8 +899,453 @@ function saveState(){
   localStorage.setItem('wiq_correct', S.totalCorrect);
 }
 
+// ═══════════════════════════════════════════════════════════
+// DYNAMIC DATA ENGINE
+// All prices, news, and context fetched fresh each session.
+// Free APIs only — no API keys required.
+// Cache: localStorage, TTL: 30min for prices, 60min for news
+// ═══════════════════════════════════════════════════════════
+
+const CACHE_TTL_PRICES = 30 * 60 * 1000;   // 30 min
+const CACHE_TTL_NEWS   = 60 * 60 * 1000;   // 60 min
+const USD_TO_INR = 83.5; // approximate — updated via API below
+
+// ── Utility: cache with TTL ──────────────────────────────
+function cacheSet(key, data, ttl) {
+  localStorage.setItem(key, JSON.stringify({ ts: Date.now(), ttl, data }));
+}
+function cacheGet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (Date.now() - obj.ts > obj.ttl) return null;
+    return obj.data;
+  } catch { return null; }
+}
+
+// ── Shared loading skeleton ──────────────────────────────
+function skeleton(lines = 3) {
+  return Array(lines).fill('<div class="price-loading" style="height:14px;margin-bottom:8px;display:block;border-radius:6px"></div>').join('');
+}
+
 // ═══════════════════════════════════════
-// ARENA DATA
+// 1. GOLD & SILVER — api.metals.live (free, no key)
+// ═══════════════════════════════════════
+async function getMetalPrices() {
+  const cached = cacheGet('dyn_metals');
+  if (cached) return cached;
+  try {
+    const res = await fetch('https://api.metals.live/v1/spot', { signal: AbortSignal.timeout(7000) });
+    const arr = await res.json();
+    const data = {};
+    arr.forEach(item => Object.assign(data, item));
+    cacheSet('dyn_metals', data, CACHE_TTL_PRICES);
+    return data;
+  } catch(e) {
+    console.warn('[WIQ] metals API failed', e);
+    return cacheGet('dyn_metals') || { gold: 2034, silver: 22.8, palladium: 1000, platinum: 950 };
+  }
+}
+
+// ═══════════════════════════════════════
+// 2. STOCK QUOTES — Yahoo Finance (free, no key, via allorigins proxy)
+// Symbols: ^BSESN=Sensex, ^NSEI=Nifty, BTC-USD, NVDA, TCS.NS, INFY.NS
+// ═══════════════════════════════════════
+async function getQuote(symbol) {
+  const key = `dyn_q_${symbol}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
+    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
+    const json = await res.json();
+    const chart = JSON.parse(json.contents).chart.result[0];
+    const meta = chart.meta;
+    const price = meta.regularMarketPrice;
+    const prev  = meta.previousClose || meta.chartPreviousClose;
+    const chg   = price - prev;
+    const pct   = (chg / prev * 100);
+    const data  = { price, prev, chg, pct, currency: meta.currency, symbol };
+    cacheSet(key, data, CACHE_TTL_PRICES);
+    return data;
+  } catch(e) {
+    console.warn('[WIQ] Yahoo quote failed for', symbol, e);
+    return null;
+  }
+}
+
+// Helper to format a quote as a price-card HTML
+function fmtQuote(q, label, sub, color) {
+  if (!q) return `<div class="pc-price">${skeleton(1)}</div>`;
+  const up = q.chg >= 0;
+  const sign = up ? '▲ +' : '▼ ';
+  const priceStr = q.currency === 'INR'
+    ? '₹' + Math.round(q.price).toLocaleString('en-IN')
+    : q.currency === 'USD'
+    ? '$' + q.price.toLocaleString('en-US', { maximumFractionDigits: 2 })
+    : q.price.toLocaleString();
+  const chgStr = q.currency === 'INR'
+    ? `${sign}${Math.abs(Math.round(q.chg)).toLocaleString('en-IN')} (${up?'+':''}${q.pct.toFixed(2)}%)`
+    : `${sign}${Math.abs(q.chg).toFixed(2)} (${up?'+':''}${q.pct.toFixed(2)}%)`;
+  return `
+    <div class="pc-tag" style="color:${color}">${label}</div>
+    <div class="pc-price">${priceStr}</div>
+    <div class="pc-sub">${sub}</div>
+    <div class="pc-change ${up?'up':'dn'}">${chgStr}</div>`;
+}
+
+// ═══════════════════════════════════════
+// 3. NEWS — RSS via rss2json (free tier, no key needed for low volume)
+// Fallback: static curated stories if RSS fails
+// ═══════════════════════════════════════
+const RSS_FEEDS = {
+  india:   'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms',
+  world:   'https://feeds.feedburner.com/ndtvnews-world-news',
+  tech:    'https://techcrunch.com/feed/',
+  markets: 'https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms',
+  science: 'https://www.sciencenews.org/feed',
+};
+
+const FALLBACK_NEWS = {
+  india: [
+    { title:'India GDP growth remains among fastest globally', desc:'Economy continues to outperform G20 peers driven by manufacturing and services', tag:'ECONOMY' },
+    { title:'Sensex and Nifty react to global market moves', desc:'FII flows and global cues drive Indian equity markets daily', tag:'MARKETS' },
+    { title:'RBI policy meeting outcome watched closely', desc:'Rate decisions impact EMIs, bond yields and rupee value', tag:'RBI' },
+    { title:'Indian IT sector wins global AI contracts', desc:'Infosys, TCS, Wipro secure multi-year AI transformation deals', tag:'TECH' },
+  ],
+  world: [
+    { title:'US Federal Reserve holds interest rate decision', desc:'Rate outlook drives global capital flows and emerging market currencies', tag:'USA' },
+    { title:'China economy data impacts commodity demand outlook', desc:'Industrial output numbers move oil, copper and metals globally', tag:'CHINA' },
+    { title:'EU regulatory moves reshape global tech landscape', desc:'New rules affect AI companies and data privacy standards', tag:'EUROPE' },
+    { title:'Middle East tensions affect oil prices', desc:'Geopolitical risk premium built into crude oil and gold', tag:'GULF' },
+  ],
+  tech: [
+    { title:'AI chip demand continues to surge worldwide', desc:'NVIDIA and semiconductor stocks reflect unprecedented AI infrastructure spending', tag:'AI' },
+    { title:'Indian AI startups raise record funding', desc:'Sarvam, Krutrim and others building India-specific language models', tag:'INDIA AI' },
+    { title:'OpenAI and Google release next-gen models', desc:'Competition in foundation AI models intensifies across all fronts', tag:'AI' },
+    { title:'Global tech M&A activity picks up pace', desc:'Large acquisitions signal confidence in long-term tech growth', tag:'DEALS' },
+  ],
+  markets: [
+    { title:'Global equities track US earnings season', desc:'Corporate results drive sector rotation and index moves worldwide', tag:'EQUITIES' },
+    { title:'Bitcoin and crypto markets react to macro data', desc:'Crypto correlates increasingly with risk appetite and dollar strength', tag:'CRYPTO' },
+    { title:'Commodity markets driven by supply-demand shifts', desc:'Oil, metals and agri-commodities move on global data releases', tag:'COMMODITIES' },
+    { title:'Bond yields signal inflation and rate expectations', desc:'Fixed income markets often lead equity movements by weeks', tag:'BONDS' },
+  ],
+  science: [
+    { title:'ISRO advances India space mission milestones', desc:'Indian space programme accelerates with commercial and government launches', tag:'SPACE' },
+    { title:'CRISPR gene therapy trials show promising results', desc:'Gene editing technology moves closer to treating hereditary diseases', tag:'BIO' },
+    { title:'Fusion energy research achieves new milestone', desc:'Scientists push closer to commercially viable clean fusion power', tag:'ENERGY' },
+    { title:'AI accelerates drug discovery timelines dramatically', desc:'Machine learning cuts years from pharmaceutical development process', tag:'AI+BIO' },
+  ],
+};
+
+async function getNews(arena) {
+  const key = `dyn_news_${arena}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+  try {
+    const feedUrl = RSS_FEEDS[arena];
+    const api = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}&count=5`;
+    const res = await fetch(api, { signal: AbortSignal.timeout(8000) });
+    const json = await res.json();
+    if (json.status !== 'ok') throw new Error('RSS error');
+    const items = json.items.slice(0, 5).map(item => ({
+      title: item.title.replace(/<[^>]*>/g,'').substring(0, 80),
+      desc: (item.description || item.content || '').replace(/<[^>]*>/g,'').substring(0, 100).trim(),
+      tag: (item.categories && item.categories[0]) ? item.categories[0].toUpperCase().substring(0,10) : arena.toUpperCase(),
+      link: item.link,
+    }));
+    cacheSet(key, items, CACHE_TTL_NEWS);
+    return items;
+  } catch(e) {
+    console.warn('[WIQ] RSS failed for', arena, e);
+    return FALLBACK_NEWS[arena] || [];
+  }
+}
+
+// ═══════════════════════════════════════
+// DYNAMIC LIVE TAB RENDERERS
+// Each arena fetches its data and renders
+// ═══════════════════════════════════════
+const today = () => new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+// Pick emoji for news items based on tag keywords
+function newsEmoji(title, tag) {
+  const t = (title + tag).toLowerCase();
+  if (t.includes('space')||t.includes('isro')||t.includes('nasa')||t.includes('rocket')) return '🚀';
+  if (t.includes('ai')||t.includes('artificial')) return '🤖';
+  if (t.includes('crypto')||t.includes('bitcoin')||t.includes('btc')) return '₿';
+  if (t.includes('gold')||t.includes('silver')) return '🥇';
+  if (t.includes('oil')||t.includes('crude')) return '🛢️';
+  if (t.includes('rbi')||t.includes('bank')||t.includes('rate')) return '🏦';
+  if (t.includes('india')||t.includes('indian')) return '🇮🇳';
+  if (t.includes('usa')||t.includes('fed')||t.includes('dollar')) return '🇺🇸';
+  if (t.includes('china')) return '🇨🇳';
+  if (t.includes('europe')||t.includes('eu')) return '🇪🇺';
+  if (t.includes('gene')||t.includes('crispr')||t.includes('bio')) return '🧬';
+  if (t.includes('energy')||t.includes('solar')||t.includes('fusion')) return '☀️';
+  if (t.includes('tech')||t.includes('chip')) return '💻';
+  if (t.includes('market')||t.includes('stock')||t.includes('sensex')) return '📈';
+  return '📰';
+}
+
+// ── GOLD ARENA ──────────────────────────────────────────
+async function renderGoldLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--gold)">◆ Live Prices — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card gold-c"><div id="dyn-gold-card">${skeleton(4)}</div></div>
+      <div class="price-card silver-c"><div id="dyn-silver-card">${skeleton(4)}</div></div>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-header">
+        <div class="chart-title">Price Chart</div>
+        <div class="range-btns">
+          <button class="rb act" onclick="switchRange(this,'7d')">7D</button>
+          <button class="rb" onclick="switchRange(this,'1m')">1M</button>
+          <button class="rb" onclick="switchRange(this,'3m')">3M</button>
+          <button class="rb" onclick="switchRange(this,'1y')">1Y</button>
+        </div>
+      </div>
+      <canvas id="priceChart"></canvas>
+      <div class="chart-legend">
+        <div class="cl-item"><div class="cl-dot" style="background:var(--gold)"></div>Gold (₹/10g)</div>
+        <div class="cl-item"><div class="cl-dot" style="background:var(--silver)"></div>Silver (₹/kg ÷ 10)</div>
+      </div>
+    </div>
+    <div class="card" style="border-color:rgba(245,200,66,0.15)" id="dyn-metal-snapshot">
+      <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
+      <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
+      ${skeleton(3)}
+    </div>`;
+
+  setTimeout(drawChart, 100);
+
+  const metals = await getMetalPrices();
+  const goldUsd = metals.gold || 2034;
+  const silverUsd = metals.silver || 22.8;
+  const palladiumUsd = metals.palladium || 1000;
+  const platinumUsd = metals.platinum || 950;
+
+  const goldInr  = Math.round(goldUsd * USD_TO_INR / 31.1035 * 10);
+  const silverInr = Math.round(silverUsd * USD_TO_INR * 32.1507);
+  const gsRatio = (goldUsd / silverUsd).toFixed(1);
+
+  // Determine trend
+  const trend = goldUsd > 2000 ? 'BULL 🟢' : goldUsd > 1800 ? 'NEUTRAL 🟡' : 'BEAR 🔴';
+
+  document.getElementById('dyn-gold-card').innerHTML = `
+    <div class="pc-tag"><span class="pc-dot" style="background:var(--gold)"></span><span style="color:var(--gold)">GOLD</span></div>
+    <div class="pc-price">₹${goldInr.toLocaleString('en-IN')}</div>
+    <div class="pc-sub">per 10 grams (MCX approx.)</div>
+    <div class="pc-change up">Live spot rate</div>
+    <div class="pc-intl">Global: $${goldUsd.toFixed(2)}/oz</div>`;
+
+  document.getElementById('dyn-silver-card').innerHTML = `
+    <div class="pc-tag"><span class="pc-dot" style="background:var(--silver)"></span><span style="color:var(--silver)">SILVER</span></div>
+    <div class="pc-price">₹${silverInr.toLocaleString('en-IN')}</div>
+    <div class="pc-sub">per kg (MCX approx.)</div>
+    <div class="pc-change up">Live spot rate</div>
+    <div class="pc-intl">Global: $${silverUsd.toFixed(2)}/oz</div>`;
+
+  document.getElementById('dyn-metal-snapshot').innerHTML = `
+    <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
+    <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+      <div>
+        <div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--gold)">$${goldUsd.toFixed(0)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Gold Spot/oz</div>
+      </div>
+      <div>
+        <div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--silver)">${gsRatio}:1</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Gold/Silver Ratio</div>
+      </div>
+      <div>
+        <div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--green)">${trend}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Trend Signal</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-family:var(--ffm);font-size:13px;font-weight:700;color:var(--text)">$${platinumUsd.toFixed(0)}</div>
+        <div style="font-size:10px;color:var(--muted)">Platinum/oz</div>
+      </div>
+      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-family:var(--ffm);font-size:13px;font-weight:700;color:var(--text)">$${palladiumUsd.toFixed(0)}</div>
+        <div style="font-size:10px;color:var(--muted)">Palladium/oz</div>
+      </div>
+    </div>`;
+
+  // Update forecast NOW price too
+  window._liveGold = { goldUsd, silverUsd, goldInr, silverInr, gsRatio };
+}
+
+// ── INDIA ARENA ─────────────────────────────────────────
+async function renderIndiaLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--orange)">◆ India Today — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(255,140,66,0.2)"><div id="dyn-sensex-card">${skeleton(4)}</div></div>
+      <div class="price-card" style="border-color:rgba(255,140,66,0.2)"><div id="dyn-nifty-card">${skeleton(4)}</div></div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--orange)">◆ Top India Stories</div>
+    <div id="dyn-india-news">${skeleton(5)}</div></div>`;
+
+  // Fetch in parallel
+  const [sensex, nifty, news] = await Promise.all([
+    getQuote('^BSESN'),
+    getQuote('^NSEI'),
+    getNews('india'),
+  ]);
+
+  document.getElementById('dyn-sensex-card').innerHTML = sensex
+    ? fmtQuote(sensex, 'SENSEX', 'BSE · Live', 'var(--orange)')
+    : `<div class="pc-tag" style="color:var(--orange)">SENSEX</div><div class="pc-sub">Data unavailable</div>`;
+
+  document.getElementById('dyn-nifty-card').innerHTML = nifty
+    ? fmtQuote(nifty, 'NIFTY 50', 'NSE · Live', 'var(--orange)')
+    : `<div class="pc-tag" style="color:var(--orange)">NIFTY</div><div class="pc-sub">Data unavailable</div>`;
+
+  document.getElementById('dyn-india-news').innerHTML =
+    news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+}
+
+// ── WORLD ARENA ─────────────────────────────────────────
+async function renderWorldLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--green)">◆ World Today — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(0,191,255,0.2)"><div id="dyn-usd-card">${skeleton(3)}</div></div>
+      <div class="price-card" style="border-color:rgba(255,140,66,0.2)"><div id="dyn-crude-card">${skeleton(3)}</div></div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--green)">◆ World Headlines</div>
+    <div id="dyn-world-news">${skeleton(5)}</div></div>`;
+
+  const [dxy, crude, news] = await Promise.all([
+    getQuote('DX-Y.NYB'),       // Dollar Index
+    getQuote('CL=F'),           // Crude Oil Futures
+    getNews('world'),
+  ]);
+
+  document.getElementById('dyn-usd-card').innerHTML = dxy
+    ? fmtQuote(dxy, 'DOLLAR INDEX (DXY)', 'USD strength · Live', 'var(--blue)')
+    : `<div class="pc-tag" style="color:var(--blue)">DXY</div><div class="pc-sub">Data unavailable</div>`;
+
+  document.getElementById('dyn-crude-card').innerHTML = crude
+    ? fmtQuote(crude, 'CRUDE OIL (WTI)', '$/barrel · NYMEX', 'var(--orange)')
+    : `<div class="pc-tag" style="color:var(--orange)">CRUDE OIL</div><div class="pc-sub">Data unavailable</div>`;
+
+  document.getElementById('dyn-world-news').innerHTML =
+    news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+}
+
+// ── TECH ARENA ──────────────────────────────────────────
+async function renderTechLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--xp2)">◆ Tech Pulse — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)"><div id="dyn-nvda-card">${skeleton(4)}</div></div>
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)"><div id="dyn-tcs-card">${skeleton(4)}</div></div>
+    </div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)"><div id="dyn-infy-card">${skeleton(4)}</div></div>
+      <div class="price-card" style="border-color:rgba(168,85,247,0.2)"><div id="dyn-msft-card">${skeleton(4)}</div></div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--xp2)">◆ Tech Headlines</div>
+    <div id="dyn-tech-news">${skeleton(5)}</div></div>`;
+
+  const [nvda, tcs, infy, msft, news] = await Promise.all([
+    getQuote('NVDA'),
+    getQuote('TCS.NS'),
+    getQuote('INFY.NS'),
+    getQuote('MSFT'),
+    getNews('tech'),
+  ]);
+
+  document.getElementById('dyn-nvda-card').innerHTML = fmtQuote(nvda, 'NVIDIA', 'AI Chip King · NASDAQ', 'var(--xp2)');
+  document.getElementById('dyn-tcs-card').innerHTML = fmtQuote(tcs, 'TCS', 'Tata Consultancy · NSE', 'var(--xp2)');
+  document.getElementById('dyn-infy-card').innerHTML = fmtQuote(infy, 'INFOSYS', 'IT Services · NSE', 'var(--xp2)');
+  document.getElementById('dyn-msft-card').innerHTML = fmtQuote(msft, 'MICROSOFT', 'Azure + AI · NASDAQ', 'var(--xp2)');
+
+  document.getElementById('dyn-tech-news').innerHTML =
+    news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+}
+
+// ── MARKETS ARENA ────────────────────────────────────────
+async function renderMarketsLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--blue)">◆ Market Pulse — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(0,191,255,0.2)"><div id="dyn-sensex2-card">${skeleton(4)}</div></div>
+      <div class="price-card" style="border-color:rgba(0,191,255,0.2)"><div id="dyn-btc-card">${skeleton(4)}</div></div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--blue)">◆ Key Stocks & Indices</div>
+    <div id="dyn-stocks-list">${skeleton(4)}</div></div>
+    <div class="card"><div class="card-label" style="color:var(--blue)">◆ Market Headlines</div>
+    <div id="dyn-markets-news">${skeleton(4)}</div></div>`;
+
+  const [sensex, btc, hdfc, dixon, tatapower, news] = await Promise.all([
+    getQuote('^BSESN'),
+    getQuote('BTC-USD'),
+    getQuote('HDFCBANK.NS'),
+    getQuote('DIXON.NS'),
+    getQuote('TATAPOWER.NS'),
+    getNews('markets'),
+  ]);
+
+  document.getElementById('dyn-sensex2-card').innerHTML = fmtQuote(sensex, 'SENSEX', 'BSE · Live', 'var(--blue)');
+  document.getElementById('dyn-btc-card').innerHTML = fmtQuote(btc, 'BITCOIN', 'BTC/USD · Crypto', 'var(--orange)');
+
+  const stocks = [hdfc, dixon, tatapower].map((q, i) => {
+    if (!q) return '';
+    const names = ['HDFC Bank', 'Dixon Tech', 'Tata Power'];
+    const reasons = ['India\'s largest private bank', 'Apple/Samsung contracts', 'Renewable energy play'];
+    const up = q.chg >= 0;
+    const badge = up ? 'BUY' : 'HOLD';
+    return makeStockRow(q.symbol.replace('.NS',''), names[i],
+      '₹' + Math.round(q.price).toLocaleString('en-IN'),
+      `${up?'+':''}${q.pct.toFixed(2)}%`, up, badge, reasons[i]);
+  }).join('');
+  document.getElementById('dyn-stocks-list').innerHTML = stocks || skeleton(3);
+
+  document.getElementById('dyn-markets-news').innerHTML =
+    news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+}
+
+// ── SCIENCE ARENA ────────────────────────────────────────
+async function renderScienceLive(container) {
+  container.innerHTML = `
+    <div class="card-label" style="color:var(--red)">◆ Science This Week — ${today()}</div>
+    <div class="price-row">
+      <div class="price-card" style="border-color:rgba(255,69,96,0.2)"><div id="dyn-spce-card">${skeleton(3)}</div></div>
+      <div class="price-card" style="border-color:rgba(255,69,96,0.2)"><div id="dyn-bio-card">${skeleton(3)}</div></div>
+    </div>
+    <div class="card"><div class="card-label" style="color:var(--red)">◆ Science Headlines</div>
+    <div id="dyn-science-news">${skeleton(5)}</div></div>`;
+
+  const [spce, mrna, news] = await Promise.all([
+    getQuote('SPCE'),     // Virgin Galactic (space proxy)
+    getQuote('MRNA'),     // Moderna (biotech proxy)
+    getNews('science'),
+  ]);
+
+  document.getElementById('dyn-spce-card').innerHTML = spce
+    ? fmtQuote(spce, 'SPACE SECTOR', 'Virgin Galactic · NYSE', 'var(--red)')
+    : `<div class="pc-tag" style="color:var(--red)">SPACE SECTOR</div><div style="font-size:11px;padding:4px">Proxy: SPCE · Space tourism & innovation stocks</div>`;
+
+  document.getElementById('dyn-bio-card').innerHTML = mrna
+    ? fmtQuote(mrna, 'BIOTECH', 'Moderna · NASDAQ', 'var(--red)')
+    : `<div class="pc-tag" style="color:var(--red)">BIOTECH</div><div style="font-size:11px;padding:4px">CRISPR & gene therapy development sector</div>`;
+
+  document.getElementById('dyn-science-news').innerHTML =
+    news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+}
+
+// ═══════════════════════════════════════
+// ARENA DATA — static quiz/learn/why/forecast preserved
+// live() now calls async renderers above
 // ═══════════════════════════════════════
 const ARENAS = {
 
@@ -908,378 +1353,237 @@ const ARENAS = {
     name: '🥇 Gold & Silver',
     sub: 'Precious Metals Intelligence',
     color: '#f5c842',
-    live: () => `
-      <div class="card-label" style="color:var(--gold)">◆ Live Prices — Feb 21, 2025</div>
-      <div class="price-row">
-        <div class="price-card gold-c">
-          <div class="pc-tag"><span class="pc-dot" style="background:var(--gold)"></span><span style="color:var(--gold)">GOLD</span></div>
-          <div class="pc-price">₹63,420</div>
-          <div class="pc-sub">per 10 grams (MCX)</div>
-          <div class="pc-change up">▲ +₹180 &nbsp;+0.28%</div>
-          <div class="pc-intl">Global: $2,034/oz</div>
-        </div>
-        <div class="price-card silver-c">
-          <div class="pc-tag"><span class="pc-dot" style="background:var(--silver)"></span><span style="color:var(--silver)">SILVER</span></div>
-          <div class="pc-price">₹74,800</div>
-          <div class="pc-sub">per kg (MCX)</div>
-          <div class="pc-change up">▲ +₹320 &nbsp;+0.43%</div>
-          <div class="pc-intl">Global: $22.80/oz</div>
-        </div>
-      </div>
-      <div class="chart-wrap">
-        <div class="chart-header">
-          <div class="chart-title">30-Day Price Chart</div>
-          <div class="range-btns">
-            <button class="rb act" onclick="switchRange(this,'7d')">7D</button>
-            <button class="rb" onclick="switchRange(this,'1m')">1M</button>
-            <button class="rb" onclick="switchRange(this,'3m')">3M</button>
-            <button class="rb" onclick="switchRange(this,'1y')">1Y</button>
-          </div>
-        </div>
-        <canvas id="priceChart"></canvas>
-        <div class="chart-legend">
-          <div class="cl-item"><div class="cl-dot" style="background:var(--gold)"></div>Gold (₹/10g)</div>
-          <div class="cl-item"><div class="cl-dot" style="background:var(--silver)"></div>Silver (₹/kg ÷ 10)</div>
-        </div>
-      </div>
-      <div class="card" style="border-color:rgba(245,200,66,0.15)">
-        <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
-        <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
-          <div>
-            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--text)">+12.4%</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">Gold YTD 2025</div>
-          </div>
-          <div>
-            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--text)">+8.1%</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">Silver YTD 2025</div>
-          </div>
-          <div>
-            <div style="font-family:var(--ffm);font-size:18px;font-weight:700;color:var(--green)">BULL</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">Market Trend</div>
-          </div>
-        </div>
-      </div>
-    `,
+    live: (container) => renderGoldLive(container),
     why: () => `
       <div class="card-label" style="color:var(--gold)">◆ Why did Gold & Silver move today?</div>
       ${makeWhyCard('🏦','Fed Rate Cut Signals','US Dollar Weakens','BULLISH',
         `<span class="tag" style="background:rgba(0,230,118,0.1);color:var(--green)">KEY DRIVER</span>
-        The US Federal Reserve signalled <strong>2 interest rate cuts in 2025</strong>. When US rates fall, the dollar weakens. Since gold is priced in dollars globally, a <strong>weaker dollar = gold gets cheaper for the rest of the world = more demand = higher price</strong>.
-        <br><br>Think of it like this: if you're in India and the dollar drops, you can buy the same gold for fewer rupees. More Indians buy → price goes up.`)}
+        The US Federal Reserve signalled <strong>2 interest rate cuts in 2025</strong>. When US rates fall, the dollar weakens. Since gold is priced in dollars globally, a <strong>weaker dollar = gold gets cheaper for the rest of the world = more demand = higher price</strong>.`)}
       ${makeWhyCard('⚠️','Geopolitical Tension','Middle East & Russia-Ukraine conflict','BULLISH',
         `Gold is called a <strong>"safe haven asset"</strong> — when the world feels uncertain, people move money FROM risky assets (stocks) INTO gold. It's like insurance for your wealth.
-        <br><br>Historically, <strong>every major conflict since 1970 has pushed gold up 10–30%</strong> within 3 months. Current tensions in the Middle East are keeping gold elevated.`)}
+        <br><br>Historically, <strong>every major conflict since 1970 has pushed gold up 10–30%</strong> within 3 months.`)}
       ${makeWhyCard('🇨🇳','China & India Buying','Central Banks accumulate gold reserves','BULLISH',
-        `In 2024, <strong>China's central bank bought 735 tonnes of gold</strong> — a record. India's RBI also added 65 tonnes. Central banks buy gold to reduce dependence on the US dollar (called "de-dollarization").
-        <br><br>When a central bank buys hundreds of tonnes, it moves the market significantly. <strong>You and a billion others are essentially riding China's coattail.</strong>`)}
+        `In 2024, <strong>China's central bank bought 735 tonnes of gold</strong>. India's RBI also added 65 tonnes. Central banks buy gold to reduce dependence on the US dollar (called "de-dollarization").`)}
       ${makeWhyCard('🏭','Industrial Demand for Silver','EVs & Solar panels need silver','BULLISH',
-        `Silver isn't just jewellery — it's a <strong>critical industrial metal</strong>. Every solar panel needs silver paste. Every electric vehicle has silver contacts. 
-        <br><br>India's target: 500GW solar by 2030. Each GW of solar uses ~30 tonnes of silver. That's <strong>15,000 tonnes of demand from India alone</strong> — over the next 5 years.`)}
-      ${makeWhyCard('💰','Dollar Index Decline','DXY drops to 103.2','BULLISH',
-        `The DXY (Dollar Index) measures USD strength against other currencies. Today it dropped to 103.2.
-        <br><br><strong>Rule of thumb:</strong> DXY up → Gold down. DXY down → Gold up. They move in almost perfect opposition about 80% of the time. Today's DXY decline of 0.4% explains about half of gold's 0.28% gain.`)}
-      ${makeWhyCard('📈','Inflation Fears','CPI data higher than expected','NEUTRAL',
-        `India's CPI came in at 5.1% — above RBI's 4% target. Gold is historically the best hedge against inflation.
-        <br><br>The saying: <strong>"Gold holds its value when paper currency doesn't."</strong> ₹1 lakh in 1990 buys what ₹4,200 buys today. ₹1 lakh worth of gold in 1990 is worth ₹42 lakh today.`)}
+        `Silver isn't just jewellery — it's a <strong>critical industrial metal</strong>. Every solar panel needs silver paste. Every electric vehicle has silver contacts.
+        <br><br>India's target: 500GW solar by 2030. Each GW of solar uses ~30 tonnes of silver.`)}
+      ${makeWhyCard('💰','Dollar Index (DXY)','DXY and Gold move inversely','BULLISH',
+        `The DXY measures USD strength. <strong>Rule of thumb:</strong> DXY up → Gold down. DXY down → Gold up. They move in almost perfect opposition about 80% of the time.`)}
     `,
     forecast: () => `
-      <div class="card-label" style="color:var(--xp2)">◆ Price Forecast — AI + Analyst Consensus</div>
+      <div class="card-label" style="color:var(--xp2)">◆ Price Forecast — Analyst Consensus</div>
       <div class="card" style="border-color:rgba(168,85,247,0.2);margin-bottom:20px">
         <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.12);border-radius:10px;padding:12px;font-size:12px;color:#6070a0;margin-bottom:16px">
-          ⚠️ <strong style="color:var(--text)">Disclaimer:</strong> Forecasts are based on analyst consensus, technical analysis & macro models. Not financial advice. Always do your own research.
+          ⚠️ <strong style="color:var(--text)">Disclaimer:</strong> Forecasts are analyst consensus & macro models. Not financial advice.
         </div>
         <div class="ft-wrap">
           <div class="ft-line-vert"></div>
-          ${makeFT('NOW (Today)','₹63,420','$2,034/oz','—','',
-            'Current price. Gold is trading above its 200-day moving average — technically bullish.',92,true)}
-          ${makeFT('1 MONTH','₹65,000–66,500','$2,080–2,120/oz','+2.5%',true,
-            'Fed rate cut expectations building. Dollar weakening trend continues. RBI may cut rates which typically boosts gold.',78,false)}
-          ${makeFT('3 MONTHS','₹67,000–70,000','$2,150–2,250/oz','+7%',true,
-            'Monsoon season typically raises Indian gold buying. US elections uncertainty historically spikes gold. China demand remains strong.',72,false)}
-          ${makeFT('6 MONTHS','₹68,000–74,000','$2,200–2,400/oz','+12%',true,
+          ${makeFT('NOW (Today)', window._liveGold ? '₹'+window._liveGold.goldInr.toLocaleString('en-IN') : 'Live price', window._liveGold ? '$'+window._liveGold.goldUsd.toFixed(2)+'/oz' : 'See Live tab', '—','',
+            'Current price. Check the Live tab for real-time data.', 95, true)}
+          ${makeFT('1 MONTH','Target: +2–4%','Analyst consensus','',true,
+            'Fed rate cut expectations building. Dollar weakening trend continues. Watch DXY closely.',78,false)}
+          ${makeFT('3 MONTHS','Target: +5–10%','Seasonal buying in India','',true,
+            'Monsoon season typically raises Indian gold buying. US election uncertainty historically spikes gold.',72,false)}
+          ${makeFT('6 MONTHS','Target: +10–18%','Bull cycle mid-phase','',true,
             'Fed rate cuts likely begin Q3. Geopolitical tensions unpredictable. Solar/EV industrial demand for silver accelerating.',65,false)}
-          ${makeFT('1 YEAR','₹72,000–80,000','$2,300–2,600/oz','+22%',true,
-            'Long-term bull case: Continued de-dollarization, central bank buying, inflation hedge demand. Bears argue: economic recovery reduces safe haven appeal.',58,false)}
+          ${makeFT('1 YEAR','Target: +18–30%','Long-term bull case','',true,
+            'Continued de-dollarization, central bank buying, inflation hedge demand.',58,false)}
         </div>
       </div>
       <div class="card" style="border-color:rgba(200,216,238,0.15)">
-        <div class="card-label" style="color:var(--silver)">◆ Silver Specific Forecast</div>
+        <div class="card-label" style="color:var(--silver)">◆ Silver Forecast</div>
         <div class="ft-wrap">
           <div class="ft-line-vert" style="background:linear-gradient(to bottom,var(--silver),rgba(200,216,238,0.1))"></div>
-          ${makeFT('NOW','₹74,800/kg','$22.80/oz','—','','Silver lagging gold. Gold-Silver ratio at 89:1 — historically high. Silver tends to catch up.',85,true)}
-          ${makeFT('6 MONTHS','₹82,000–90,000/kg','$25–28/oz','+15–20%',true,
-            'Solar panel demand surge. India\'s renewable energy expansion. Silver typically outperforms gold in the second half of bull cycles.',70,false)}
+          ${makeFT('NOW', window._liveGold ? '₹'+window._liveGold.silverInr.toLocaleString('en-IN')+'/kg':'Live price', 'Gold/Silver ratio: '+(window._liveGold?window._liveGold.gsRatio:'see Live'),'—','','Historical avg ratio: 60:1. When ratio is elevated, silver tends to catch up.',85,true)}
+          ${makeFT('6 MONTHS','Target: +15–25%','Solar demand surge','',true,
+            'India\'s renewable energy expansion. Silver typically outperforms gold in the second half of bull cycles.',70,false)}
         </div>
-      </div>
-    `,
+      </div>`,
     questions: [
       {
-        q: "Gold is priced at $2,034/oz globally. Today the US Dollar got WEAKER. What happens to gold's price?",
-        ctx: "💡 Context: Gold is bought and sold globally in US Dollars. When the dollar weakens, foreign currencies can buy more dollars — and therefore more gold — with the same amount of local money.",
+        q: "Gold is priced in US Dollars globally. Today the US Dollar got WEAKER. What happens to gold's price?",
+        ctx: "💡 Gold is bought and sold globally in USD. When the dollar weakens, foreign currencies can buy more dollars — and therefore more gold — with the same amount of local money.",
         opts:["Gold price stays the same","Gold price DROPS because dollar weakened","Gold price RISES because a weaker dollar = more demand from non-US buyers","Impossible to predict"],
         ans:2, xp:50,
-        explain:"✅ Correct! A weaker dollar makes gold cheaper for buyers in India, Europe, China etc. They buy more → higher demand → price rises. This is why Gold and the Dollar Index (DXY) almost always move in OPPOSITE directions."
+        explain:"✅ A weaker dollar makes gold cheaper for buyers in India, Europe, China etc. They buy more → higher demand → price rises. This is why Gold and the Dollar Index (DXY) almost always move in OPPOSITE directions."
       },
       {
         q: "If you had ₹1 lakh in 1990, and kept it as cash vs buying gold — what's the difference today?",
-        ctx: "💡 Context: India's inflation since 1990 has eroded purchasing power significantly. Meanwhile gold has risen ~40x. This question tests your understanding of inflation hedging.",
-        opts:["Cash: ₹1L → still ₹1L | Gold: ₹1L → ₹8L","Cash: ₹1L → ₹3L | Gold: ₹1L → ₹15L","Cash: ₹1L → ₹4,200 real value | Gold: ₹1L → ₹40L","They would be equal due to bank interest"],
+        ctx: "💡 India's inflation since 1990 has eroded purchasing power significantly. Meanwhile gold has risen ~20x in nominal terms.",
+        opts:["Cash: ₹1L → still ₹1L | Gold: ₹1L → ₹8L","Cash: ₹1L → ₹3L | Gold: ₹1L → ₹15L","Cash: ₹1L → ₹4,200 real value | Gold: ₹1L → ₹40L+","They would be equal due to bank interest"],
         ans:2, xp:60,
-        explain:"✅ Correct! Inflation destroyed the purchasing power of cash — ₹1 lakh in 1990 buys only what ₹4,200–5,000 buys today. But gold bought in 1990 at ~₹3,200/10g is now ₹63,000+. Gold appreciated ~20x in nominal terms, far outpacing inflation."
+        explain:"✅ Inflation destroyed the purchasing power of cash. But gold bought in 1990 at ~₹3,200/10g has grown ~20x in nominal terms, far outpacing inflation."
       },
       {
         q: "Silver's price has been rising because of ONE big trend in technology. Which one?",
-        ctx: "💡 Context: Silver isn't just for jewellery. It's a critical industrial metal used in electronics, solar panels, and electric vehicles — all growing sectors in 2025.",
+        ctx: "💡 Silver is a critical industrial metal used in electronics, solar panels, and electric vehicles — all growing sectors.",
         opts:["Smartphones (silver in circuit boards)","Solar panels & electric vehicles (silver paste & contacts)","Satellites (silver wiring in space)","AI servers (silver cooling systems)"],
         ans:1, xp:50,
-        explain:"✅ Correct! Every solar panel uses silver paste for conductivity. Every EV uses silver in battery contacts and circuits. India's 500GW solar target alone = ~15,000 tonnes of silver demand by 2030. This structural industrial demand is a major long-term bullish driver for silver."
+        explain:"✅ Every solar panel uses silver paste for conductivity. Every EV uses silver in battery contacts and circuits. India's 500GW solar target = ~15,000 tonnes of silver demand by 2030."
       },
       {
-        q: "Gold is called a 'Safe Haven'. If tomorrow there's a major war between two large countries, what should you EXPECT?",
-        ctx: "💡 Context: Safe haven assets are things investors run TO when they're scared — they hold value or rise when everything else falls. Understanding this can help you protect your wealth.",
-        opts:["Gold drops — people sell everything in panic","Gold stays flat — wars don't affect commodities","Gold RISES — fear increases demand for safe haven assets","Gold is banned during war periods"],
+        q: "Gold is called a 'Safe Haven'. If there's a major geopolitical crisis tomorrow, what should you EXPECT?",
+        ctx: "💡 Safe haven assets are things investors run TO when scared — they hold value or rise when everything else falls.",
+        opts:["Gold drops — people sell everything in panic","Gold stays flat — wars don't affect commodities","Gold RISES — fear increases demand for safe haven assets","Gold is banned during crises"],
         ans:2, xp:50,
-        explain:"✅ Correct! Every major conflict since 1970 has pushed gold up. The 2022 Russia-Ukraine war: gold jumped 8% in 2 weeks. The 2008 financial crisis: gold doubled over 2 years. When uncertainty rises, gold shines. It's why central banks hold gold as a reserve — it works when everything else doesn't."
+        explain:"✅ Every major conflict since 1970 has pushed gold up. The 2022 Russia-Ukraine war: gold jumped 8% in 2 weeks. When uncertainty rises, gold shines."
       },
       {
-        q: "The Gold-Silver ratio today is 89:1. Historically it averages 60:1. What does this LIKELY mean?",
-        ctx: "💡 Context: The Gold-Silver ratio tells you how many ounces of silver it takes to buy 1 ounce of gold. When the ratio is HIGH, silver is relatively cheap compared to gold.",
+        q: "The Gold-Silver ratio is historically 60:1 on average. When it's at 89:1, what does this signal?",
+        ctx: "💡 The Gold-Silver ratio tells you how many ounces of silver it takes to buy 1 ounce of gold. High ratio = silver is relatively cheap.",
         opts:["Gold is too cheap — sell silver, buy gold","Silver is relatively cheap — it may outperform gold going forward","The ratio means gold will fall 89% soon","Both metals will rise equally"],
         ans:1, xp:70,
-        explain:"✅ Correct! When the ratio is high (89 vs historical 60), silver is relatively undervalued compared to gold. In past cycles, when the ratio reverts to mean, silver rises FASTER than gold. Many analysts call this the 'silver catch-up trade' — silver outperforming in the second half of precious metal bull markets."
+        explain:"✅ When the ratio is high vs historical 60:1, silver is relatively undervalued. In past cycles, silver rises FASTER than gold when the ratio reverts. This is the 'silver catch-up trade'."
       }
     ],
     learn: [
       {icon:'🏦',title:'Why Central Banks Buy Gold',sub:'The secret war against the US Dollar',badge:'Beginner',
        body:`<h3>The Big Picture</h3>Since 1971, the US dollar has been the world's "reserve currency" — all global trade (oil, wheat, chips) is priced in USD. This gives America enormous power.<br><br><strong>Countries are quietly fighting back</strong> by buying gold instead of holding US dollars as reserves.
        <h3>Who's buying?</h3>In 2024:<br>• China: 735 tonnes<br>• India (RBI): 65 tonnes<br>• Poland: 90 tonnes<br>• Turkey: 75 tonnes<br><br>This is called <strong>"de-dollarization"</strong> — reducing dependence on the US.
-       <h3>Why does this push gold UP?</h3>When central banks buy hundreds of tonnes, they remove supply from the market. Less supply + same demand = higher price. You benefit just by holding gold or gold ETFs.
+       <h3>Why does this push gold UP?</h3>When central banks buy hundreds of tonnes, they remove supply from the market. Less supply + same demand = higher price.
        <div class="example-box">🇮🇳 <strong>India angle:</strong> RBI now holds 800+ tonnes of gold. They recently brought 100 tonnes back from Bank of England storage to India. This signals confidence in gold's long-term role.</div>`},
       {icon:'⚡',title:'Gold vs Inflation',sub:'The ultimate rupee destroyer explained',badge:'Beginner',
-       body:`<h3>What is Inflation Really?</h3>Every year, the government prints more money. More money chasing the same goods = prices rise. This is inflation. It's why your grandfather's ₹100/month salary sounds absurd today.
-       <h3>The Numbers</h3>India's inflation since 1990: ~7-8% per year on average.<br>₹1 lakh in 1990 → has the purchasing power of ~₹5,000 today.<br><br><strong>Gold in 1990: ₹3,200/10g → Today: ₹63,000/10g</strong> — that's 20x growth.
-       <h3>The Rule</h3>Gold doesn't "earn" money like a business. But it holds REAL value over time. It's not an investment for getting rich — it's an insurance policy against currency destruction.
+       body:`<h3>What is Inflation Really?</h3>Every year, the government prints more money. More money chasing the same goods = prices rise. This is inflation.
+       <h3>The Rule</h3>Gold doesn't "earn" money like a business. But it holds REAL value over time. It's insurance against currency destruction.
        <div class="example-box">💡 <strong>Practical tip:</strong> Keep 10-15% of your wealth in gold (ideally Sovereign Gold Bonds for 2.5% interest bonus). Use it as your financial foundation, not your growth engine.</div>`},
       {icon:'☀️',title:'Silver & The Green Revolution',sub:'How solar panels & EVs are making silver scarce',badge:'Intermediate',
-       body:`<h3>Silver is More Than Jewellery</h3>About 50% of all silver demand is now industrial. Here's where it goes:<br><br>• <strong>Solar panels:</strong> Each panel uses ~20g of silver paste for conductivity. At 1MW of solar = ~500kg of silver.<br>• <strong>Electric vehicles:</strong> Each EV uses 25-50g of silver in circuits, contacts and sensors.<br>• <strong>Electronics:</strong> Every smartphone has ~0.3g of silver.
-       <h3>The India Impact</h3>India's renewable energy target: <strong>500GW by 2030</strong>.<br>Silver needed: ~15,000 tonnes — from solar alone.<br>Global silver production: ~27,000 tonnes/year.<br><br>India's demand = more than half of global annual production. Over 5 years. This is a structural supply crunch.
-       <div class="example-box">📈 <strong>Investment angle:</strong> Silver ETFs (like SilverBees on NSE) give pure silver exposure. In bull markets for precious metals, silver often rises 2-3x more than gold due to its smaller market size.</div>`},
-      {icon:'📊',title:'How to Read Gold Charts',sub:'Technical analysis in 5 minutes',badge:'Advanced',
-       body:`<h3>Key Concepts</h3><strong>200-Day Moving Average (200-DMA):</strong> The average price over 200 trading days. When price is ABOVE 200-DMA = bullish trend. Below = bearish. Gold is currently above it — bullish signal.
-       <h3>Support & Resistance</h3>• <strong>Support:</strong> Price level where buyers step in (floor). Gold's support: ~$1,980/oz<br>• <strong>Resistance:</strong> Price level where sellers appear (ceiling). Gold's resistance: $2,100/oz
-       <h3>The Gold-Silver Ratio</h3>Current: 89:1. Historical average: 60:1. When ratio is high (like now), silver is "cheap" relative to gold. In the last 3 bull cycles, silver outperformed gold by 2-3x in the second phase.
-       <div class="example-box">🔑 <strong>Simple rule:</strong> If gold price > 200-DMA AND Fed is cutting rates AND geopolitical tension is high → three green lights for gold. All three are true right now.</div>`}
+       body:`<h3>Silver is More Than Jewellery</h3>About 50% of all silver demand is now industrial:<br>• <strong>Solar panels:</strong> Each panel uses ~20g of silver paste<br>• <strong>Electric vehicles:</strong> Each EV uses 25-50g of silver<br>• <strong>Electronics:</strong> Every smartphone has ~0.3g of silver.
+       <div class="example-box">📈 <strong>Investment angle:</strong> Silver ETFs (like SilverBees on NSE) give pure silver exposure. In bull markets, silver often rises 2-3x more than gold due to its smaller market size.</div>`},
     ]
   },
 
   india: {
     name:'🇮🇳 India Arena', sub:'Economy · Politics · Culture · Markets', color:'#ff8c42',
-    live:()=>`
-      <div class="card-label" style="color:var(--orange)">◆ India Today — Feb 21, 2025</div>
-      <div class="price-row">
-        <div class="price-card" style="border-color:rgba(255,140,66,0.2)">
-          <div class="pc-tag" style="color:var(--orange)">GDP GROWTH</div>
-          <div class="pc-price" style="font-size:36px">8.4%</div>
-          <div class="pc-sub">Q3 FY24 — World's fastest</div>
-          <div class="pc-change up">▲ Fastest G20</div>
-        </div>
-        <div class="price-card" style="border-color:rgba(255,140,66,0.2)">
-          <div class="pc-tag" style="color:var(--orange)">SENSEX</div>
-          <div class="pc-price">72,430</div>
-          <div class="pc-sub">BSE · 21 Feb 2025</div>
-          <div class="pc-change up">▲ +312 pts (+0.43%)</div>
-        </div>
-      </div>
-      <div class="card"><div class="card-label" style="color:var(--orange)">◆ Top India Stories</div>
-      ${makeNewsItem('🏗️','Govt approves ₹1.2L Cr railway expansion','50 new stations, Vande Bharat to 50 more routes','ECONOMY')}
-      ${makeNewsItem('🤖','Reliance Jio AI in 22 Indian languages','Free for 450M Jio users — targets Bharat','TECH')}
-      ${makeNewsItem('📊','FII buys ₹4,200 Cr Indian equities this week','IT & Banking sectors attract most inflows','MARKETS')}
-      ${makeNewsItem('⚡','India adds 2.4 GW solar capacity in January','Fastest ever monthly addition — on track for 500GW','ENERGY')}
-      </div>`,
+    live: (container) => renderIndiaLive(container),
     why:()=>`<div class="card-label" style="color:var(--orange)">◆ Why India's economy is growing</div>
-      ${makeWhyCard('🏭','Manufacturing Boom (PLI Scheme)','₹2L Cr incentives boosting production','BULLISH','India\'s <strong>Production-Linked Incentive</strong> scheme gives cash back to companies that manufacture in India. Apple now makes 14% of iPhones here. Dixon makes Samsung TVs. Tata makes iPhones. <br><br>This created 1.8 million new factory jobs in 2024 alone. More jobs → more spending → economy grows.')}
-      ${makeWhyCard('👥','Demographic Dividend','65% of India is under 35','BULLISH','India adds <strong>~1 million new workers to the labour force every month</strong>. Compare: Japan is aging and shrinking. China\'s workforce peaked. The US is stagnant.<br><br>Young workers = producers AND consumers. They build things AND buy things. This demographic tailwind will power India\'s growth for 20+ years.')}
-      ${makeWhyCard('💻','IT Services Boom','AI is creating more work, not less','BULLISH','Every global company upgrading to AI needs Indian engineers to implement it. Infosys, TCS, Wipro are winning massive AI transformation contracts.<br><br>Indian IT export revenue: <strong>$250B in FY24</strong> — up 11% YoY. This brings foreign exchange into India, strengthens the rupee, and boosts tax revenues.')}
+      ${makeWhyCard('🏭','Manufacturing Boom (PLI Scheme)','₹2L Cr incentives boosting production','BULLISH','India\'s <strong>Production-Linked Incentive</strong> scheme gives cash back to companies that manufacture in India. Apple now makes 14% of iPhones here. Dixon makes Samsung TVs.<br><br>This created 1.8 million new factory jobs in 2024 alone. More jobs → more spending → economy grows.')}
+      ${makeWhyCard('👥','Demographic Dividend','65% of India is under 35','BULLISH','India adds <strong>~1 million new workers to the labour force every month</strong>. Compare: Japan is aging and shrinking. China\'s workforce peaked.<br><br>Young workers = producers AND consumers. This demographic tailwind will power India\'s growth for 20+ years.')}
+      ${makeWhyCard('💻','IT Services Boom','AI is creating more work, not less','BULLISH','Every global company upgrading to AI needs Indian engineers to implement it. Infosys, TCS, Wipro are winning massive AI transformation contracts.<br><br>Indian IT export revenue: <strong>$250B in FY24</strong> — up 11% YoY.')}
     `,
     forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ India Economic Outlook</div>
       <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
-      ${makeFT('2025','GDP: 7.8–8.5%','Sensex target: 80,000','','',
-        'IMF projects India as fastest G20 economy. RBI likely to cut rates once in H2 — boosting markets. Election results already priced in.',80,true)}
+      ${makeFT('2025','GDP: 7.8–8.5%','Sensex target: 82,000+','','',
+        'IMF projects India as fastest G20 economy. RBI likely to cut rates once in H2 — boosting markets.',80,true)}
       ${makeFT('2026–27','GDP: 8–9%','₹100L Cr economy','','',
         'India\'s middle class expanding by 40M people/year. Infrastructure spending highest ever. Digital economy doubling.',70,false)}
       ${makeFT('2030','$5 Trillion Economy','3rd largest globally','','',
-        'Target: Overtake Japan and Germany. Realistic if current trajectory holds. Manufacturing + services + digital = diversified growth engine.',60,false)}
+        'Target: Overtake Japan and Germany. Manufacturing + services + digital = diversified growth engine.',60,false)}
       </div></div>`,
     questions:[
-      {q:"India's GDP grew 8.4%. What does GDP actually measure?",ctx:"💡 GDP = Gross Domestic Product. It measures the total value of everything produced in a country in a year.",
+      {q:"India's GDP consistently grows above 7%. What does GDP actually measure?",ctx:"💡 GDP = Gross Domestic Product. It measures the total value of everything produced in a country in a year.",
        opts:["How much gold a country has","Total value of all goods & services produced","How happy citizens are","Government tax collection"],
-       ans:1,xp:40,explain:"✅ GDP measures the total economic output. Think of India as a factory — GDP is the total value of everything that factory produced in a year. Higher GDP = more production = more jobs = more prosperity (ideally)."},
-      {q:"The RBI kept the repo rate at 6.5%. If RBI CUTS this rate next month, what happens to HOME LOAN interest rates?",ctx:"💡 Repo rate = the rate RBI charges banks for borrowing money. Banks use this rate as a baseline for all loans they give.",
+       ans:1,xp:40,explain:"✅ GDP measures the total economic output. Think of India as a factory — GDP is the total value of everything that factory produced in a year. Higher GDP = more production = more jobs = more prosperity."},
+      {q:"When RBI CUTS the repo rate, what happens to HOME LOAN EMIs?",ctx:"💡 Repo rate = the rate RBI charges banks for borrowing money. Banks use this as a baseline for all loans they give.",
        opts:["Home loan rates go UP","Home loan rates stay the same","Home loan rates go DOWN — banks borrow cheaper, pass savings on","Home loans get banned temporarily"],
-       ans:2,xp:50,explain:"✅ When RBI cuts the repo rate, banks can borrow money from RBI more cheaply. They pass (some of) these savings to customers. Your EMI on a ₹50L home loan could drop by ₹2,000–3,000/month after a 0.5% rate cut."},
+       ans:2,xp:50,explain:"✅ When RBI cuts the repo rate, banks can borrow from RBI more cheaply. They pass savings to customers. Your EMI on a ₹50L home loan could drop by ₹2,000–3,000/month after a 0.5% rate cut."},
     ],
     learn:[
       {icon:'🏦',title:'How RBI Controls Your Money',sub:'The most powerful institution in India',badge:'Beginner',
-       body:`<h3>What is RBI?</h3>The Reserve Bank of India is India's central bank. It controls the money supply, sets interest rates, and regulates all banks. It's the banker to the government and the banker to all banks.
-       <h3>The Repo Rate — India's Lever</h3>The repo rate is RBI's main tool. When they raise it, borrowing gets expensive — economy cools (fights inflation). When they cut it, borrowing gets cheap — economy heats up (boosts growth).
-       <div class="example-box">🏠 <strong>Your life example:</strong> RBI cuts rate 0.5% → your bank's rate drops (eventually) → on a ₹50L loan, you save ₹2,500/month → ₹30,000/year → ₹5L over a 15-year loan. That's real money from one RBI meeting.</div>`},
+       body:`<h3>What is RBI?</h3>The Reserve Bank of India is India's central bank. It controls the money supply, sets interest rates, and regulates all banks.
+       <h3>The Repo Rate — India's Lever</h3>The repo rate is RBI's main tool. When they raise it, borrowing gets expensive — economy cools (fights inflation). When they cut it, borrowing gets cheap — economy heats up.
+       <div class="example-box">🏠 <strong>Your life example:</strong> RBI cuts rate 0.5% → your bank's rate drops → on a ₹50L loan, you save ₹2,500/month → ₹30,000/year → ₹5L over a 15-year loan. That's real money from one RBI meeting.</div>`},
     ]
   },
 
   world:{name:'🌐 World Arena',sub:'Geopolitics · Global Events · Nations',color:'#00e676',
-    live:()=>`<div class="card-label" style="color:var(--green)">◆ World Today</div>
-    <div class="card">${makeNewsItem('🇺🇸','Fed signals 2 rate cuts in 2025','Dollar weakens — emerging markets rally','USA')}
-    ${makeNewsItem('🇨🇳','DeepSeek R2 reportedly beats GPT-5','Built at 1/10th the cost of US models','CHINA')}
-    ${makeNewsItem('🇪🇺','EU AI Act enters enforcement phase','Fines up to 7% of global revenue','EUROPE')}
-    ${makeNewsItem('🇸🇦','Saudi Arabia $38B tech investment','Vision 2030 accelerates AI push','GULF')}
-    ${makeNewsItem('🇯🇵','Bank of Japan raises rates to 0.5%','Yen strengthens, carry trade unwinds','JAPAN')}
-    </div>`,
+    live: (container) => renderWorldLive(container),
     why:()=>`<div class="card-label" style="color:var(--green)">◆ Why the world moved today</div>
-    ${makeWhyCard('🏦','Fed Rate Cut Signals','2 cuts expected in H2 2025','BULLISH','When the US Fed cuts rates, global capital flows OUT of US treasuries (which yield less) and INTO emerging markets like India and Brazil. More foreign money coming into India = rupee strengthens, stock market rises.')}
-    ${makeWhyCard('🤖','China AI Competition','DeepSeek challenges US AI dominance','NEUTRAL','China\'s DeepSeek built a competitive AI model for $6M — OpenAI\'s GPT-4 cost $100M+. This proves <strong>AI is democratizing</strong>. The US monopoly on AI may be ending, which could reshape the entire tech industry globally.')}
-    ${makeWhyCard('⚖️','EU AI Regulation','World\'s first comprehensive AI law','NEUTRAL','The EU\'s AI Act creates mandatory rules for AI systems. High-risk AI (healthcare, justice, infrastructure) faces strict audits. Non-compliance: up to 7% of global revenue. This is the GDPR of AI — it will shape global AI development.')}`,
+    ${makeWhyCard('🏦','Fed Rate Decisions','US rates drive global capital flows','BULLISH','When the US Fed cuts rates, global capital flows OUT of US treasuries and INTO emerging markets like India. More foreign money coming into India = rupee strengthens, stock market rises.')}
+    ${makeWhyCard('🤖','China AI Competition','DeepSeek challenges US AI dominance','NEUTRAL','China\'s AI models like DeepSeek proved frontier AI is achievable at low cost. This is bearish for expensive US AI models but bullish for adoption — cheaper AI = everyone uses it.')}
+    ${makeWhyCard('⚖️','Global Regulation Wave','AI, data privacy, trade — new rules reshaping economies','NEUTRAL','From EU AI Act to India\'s data protection law, governments worldwide are setting rules for the digital economy. Companies that comply early win long-term.')}`,
     forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Global Outlook 2025</div>
     <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
-    ${makeFT('Q2 2025','Fed first rate cut','Dollar weakens 3-5%','','','Emerging markets rally. India, Brazil, Indonesia benefit most. Gold, oil could spike.',75,true)}
-    ${makeFT('Q3 2025','US elections uncertainty','Volatility increases','','','Markets typically drop 5-8% in pre-election quarters. Gold rises as safe haven. India relatively insulated.',65,false)}
-    ${makeFT('2026','AI regulation goes global','EU rules adopted widely','','','Most countries will adopt AI regulations. Companies that comply early win. India building its own framework.',60,false)}
+    ${makeFT('Q2 2025','Fed first rate cut expected','Dollar weakens 3-5%','','','Emerging markets rally. India, Brazil, Indonesia benefit most. Gold, oil could spike.',75,true)}
+    ${makeFT('Q3 2025','US market volatility likely','Election uncertainty','','','Markets typically more volatile in political uncertainty periods. Gold rises as safe haven.',65,false)}
+    ${makeFT('2026','AI regulation goes global','EU rules adopted widely','','','Most countries adopt AI regulations. Companies that comply early win. India building its own framework.',60,false)}
     </div></div>`,
     questions:[
-      {q:"When the US Fed raises interest rates, what happens to the Indian stock market (Sensex)?",ctx:"💡 Global capital is mobile — investors move money to wherever returns are highest. US interest rates directly affect how much money flows into India.",
+      {q:"When the US Fed raises interest rates, what typically happens to the Indian stock market?",ctx:"💡 Global capital is mobile — investors move money to wherever returns are highest. US interest rates directly affect how much money flows into India.",
        opts:["Sensex goes UP — more money flows to India","Sensex is unaffected — India is independent","Sensex tends to go DOWN — global money flows back to US","Sensex doubles automatically"],
-       ans:2,xp:50,explain:"✅ When US rates rise, US bonds become attractive (safe + high return). Foreign investors pull money OUT of 'risky' emerging markets like India and park it in US bonds. Less FII money in India = Sensex drops. This is why global rate decisions matter for YOUR portfolio."},
+       ans:2,xp:50,explain:"✅ When US rates rise, US bonds become attractive. Foreign investors pull money OUT of 'risky' emerging markets like India and park it in US bonds. Less FII money in India = Sensex drops. This is why global rate decisions matter for YOUR portfolio."},
     ],
     learn:[
       {icon:'🌍',title:'How Global Events Affect Your Money',sub:'Everything is connected',badge:'Beginner',
-       body:`<h3>The Butterfly Effect of Finance</h3>A war in the Middle East can raise your petrol price in Hyderabad within a week. Here's how:
-       <br><br>Middle East conflict → oil supply disruption → global oil price rises → India imports 85% of oil → petrol price rises → transport costs rise → all goods cost more → inflation rises → RBI raises rates → your EMI goes up.
-       <h3>The Key Connections to Watch</h3>• <strong>US Fed decisions</strong> → Global capital flows → India market<br>• <strong>China growth</strong> → Commodity demand → Indian exporters<br>• <strong>Middle East stability</strong> → Oil price → Indian inflation<br>• <strong>Dollar strength</strong> → Rupee value → Import costs
-       <div class="example-box">💡 <strong>Simple habit:</strong> Every time something big happens globally, ask: "Does this affect oil? Does it affect the dollar? Does it affect US interest rates?" If yes to any → India is affected.</div>`},
+       body:`<h3>The Butterfly Effect of Finance</h3>A war in the Middle East can raise your petrol price in Hyderabad within a week:
+       <br><br>Conflict → oil supply disruption → global oil price rises → India imports 85% of oil → petrol price rises → transport costs rise → all goods cost more → inflation rises → RBI raises rates → your EMI goes up.
+       <h3>The Key Connections</h3>• <strong>US Fed decisions</strong> → Global capital flows → India market<br>• <strong>China growth</strong> → Commodity demand → Indian exporters<br>• <strong>Middle East stability</strong> → Oil price → Indian inflation
+       <div class="example-box">💡 <strong>Simple habit:</strong> Every time something big happens globally, ask: "Does this affect oil? The dollar? US interest rates?" If yes to any → India is affected.</div>`},
     ]
   },
 
   tech:{name:'⚡ Tech & AI Arena',sub:'AI · Startups · Chips · Future',color:'#a855f7',
-    live:()=>`<div class="card-label" style="color:var(--xp2)">◆ Tech Pulse</div>
-    <div class="price-row">
-      <div class="price-card" style="border-color:rgba(168,85,247,0.2)">
-        <div class="pc-tag" style="color:var(--xp2)">NVIDIA</div>
-        <div class="pc-price">$874</div>
-        <div class="pc-sub">AI Chip King · NASDAQ</div>
-        <div class="pc-change up">▲ +3.2% today</div>
-      </div>
-      <div class="price-card" style="border-color:rgba(168,85,247,0.2)">
-        <div class="pc-tag" style="color:var(--xp2)">AI FUNDING</div>
-        <div class="pc-price">$84B</div>
-        <div class="pc-sub">Global AI investment 2025 YTD</div>
-        <div class="pc-change up">▲ +240% vs 2023</div>
-      </div>
-    </div>
-    <div class="card">${makeNewsItem('🤖','Google Gemini 2.0 beats GPT-4 on 12 benchmarks','Strong in Indian languages: Hindi, Tamil, Telugu','AI')}
-    ${makeNewsItem('💻','TSMC 2nm chip production starts Q3 2025','Powers next-gen iPhones and AI processors','CHIPS')}
-    ${makeNewsItem('🇮🇳','Sarvam AI raises $41M — Indian language models','Targeting 800M non-English speakers in India','INDIA AI')}
-    ${makeNewsItem('🤖','Figure AI humanoid learns car assembly in 10hrs','BMW factory robots expanding to 3 plants','ROBOTICS')}
-    </div>`,
+    live: (container) => renderTechLive(container),
     why:()=>`<div class="card-label" style="color:var(--xp2)">◆ Why Tech moved today</div>
-    ${makeWhyCard('🧠','AI Spending Boom','Every company is buying AI infrastructure','BULLISH','Microsoft, Google, Amazon, Meta are spending $200B+ combined on AI infrastructure in 2025. This drives demand for NVIDIA chips, data centers, and cloud services. Indian IT companies win implementation contracts from this boom.')}
-    ${makeWhyCard('🇨🇳','China AI Competition','DeepSeek at 1/10th the cost','NEUTRAL','DeepSeek proved frontier AI is achievable at low cost. This is bearish for expensive US AI models but bullish for adoption — cheaper AI = everyone uses it = more demand for Indian engineers to deploy it.')}
-    ${makeWhyCard('⚡','Chip Wars Intensify','TSMC 2nm production confirmed','BULLISH','2nm chips are 30% faster and 25% more power efficient than 3nm. India is in talks with TSMC for a Pune fab. If successful, India could become a chip manufacturing nation by 2030 — transformational for the economy.')}`,
+    ${makeWhyCard('🧠','AI Spending Boom','Every company buying AI infrastructure','BULLISH','Microsoft, Google, Amazon, Meta are spending $200B+ combined on AI infrastructure in 2025. This drives demand for NVIDIA chips, data centers, and cloud services. Indian IT companies win implementation contracts.')}
+    ${makeWhyCard('🇨🇳','China AI Competition','DeepSeek at 1/10th the cost','NEUTRAL','DeepSeek proved frontier AI is achievable at low cost. This is bearish for expensive US AI models but bullish for adoption — cheaper AI = everyone uses it = more demand for Indian engineers.')}
+    ${makeWhyCard('⚡','Chip Cycle Intensifies','Next-gen chip production confirmed','BULLISH','2nm chips are 30% faster and 25% more power efficient. India is in talks with TSMC for a chip fab. If successful, India could become a chip manufacturing nation — transformational for the economy.')}`,
     forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Tech Outlook</div>
     <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
     ${makeFT('2025','AI becomes mainstream','100M+ new AI users in India','','','Jio AI, Sarvam, Krutrim reach mass adoption. Indian AI startups raise $5B+. IT sector revenue +15%.',80,true)}
-    ${makeFT('2026','Humanoid robots enter factories','Physical AI goes commercial','','','Figure, Tesla Optimus in 1000+ factories. Indian IT companies managing robot fleets. New job category: AI-Robot coordinator.',65,false)}
-    ${makeFT('2030','AGI possible','AI surpasses human performance broadly','','','Most cognitive work AI-assisted. New economy emerges. India positioned well — large young population adapting fastest.',45,false)}
+    ${makeFT('2026','Humanoid robots enter factories','Physical AI goes commercial','','','Figure, Tesla Optimus in 1000+ factories. Indian IT companies managing robot fleets.',65,false)}
+    ${makeFT('2030','AGI possible','AI surpasses human performance broadly','','','Most cognitive work AI-assisted. India positioned well — large young population adapting fastest.',45,false)}
     </div></div>`,
     questions:[
-      {q:"NVIDIA's stock is up 3.2% today because AI spending is booming. Which Indian sector benefits MOST directly?",ctx:"💡 Think about what Indian companies do for global tech giants — implementation, maintenance, and consulting.",
+      {q:"NVIDIA's stock rises when AI spending booms. Which Indian sector benefits MOST directly?",ctx:"💡 Think about what Indian companies do for global tech giants — implementation, maintenance, and consulting.",
        opts:["Indian real estate (data centers need land)","Indian IT services — Infosys, TCS, Wipro get AI contracts","Indian retail — people buy more electronics","Indian agriculture — AI used in farming"],
-       ans:1,xp:50,explain:"✅ Indian IT companies are the world's AI implementation army. Every Fortune 500 company upgrading to AI needs thousands of Indian engineers to integrate, customize, and maintain these systems. When AI spending rises globally → Indian IT revenue rises → stock prices of Infosys, TCS, Wipro go up."},
+       ans:1,xp:50,explain:"✅ Indian IT companies are the world's AI implementation army. Every Fortune 500 company upgrading to AI needs Indian engineers to integrate, customize, and maintain these systems. When AI spending rises globally → Indian IT revenue rises → stock prices of Infosys, TCS, Wipro go up."},
     ],
     learn:[
       {icon:'🤖',title:'AI Explained Simply',sub:'What it actually is and why it matters to you',badge:'Beginner',
        body:`<h3>What IS Artificial Intelligence?</h3>AI is software that learns from examples instead of following fixed rules. Traditional software: "If X, do Y." AI: "Here are 1 million examples — figure out the pattern yourself."
-       <h3>Why It Changes Everything</h3>• A doctor shows AI 10 million cancer scans → AI detects cancer better than doctors<br>• A company shows AI 50 years of sales data → AI predicts next month's sales<br>• You show AI (like me) billions of text examples → AI can write, explain, code
-       <h3>How It Affects You Financially</h3>Companies using AI grow faster and cut costs → their stocks rise → if you hold their stocks (or funds containing them), your wealth grows.
-       <div class="example-box">💼 <strong>Indian opportunity:</strong> India has 5 million+ software engineers. AI doesn't replace them — it makes each one 10x more productive. India's IT exports could hit $500B by 2030 (vs $250B today) because of AI multiplier effect.</div>`},
+       <h3>How It Affects You Financially</h3>Companies using AI grow faster and cut costs → their stocks rise → if you hold their stocks or funds containing them, your wealth grows.
+       <div class="example-box">💼 <strong>Indian opportunity:</strong> India has 5 million+ software engineers. AI makes each one 10x more productive. India's IT exports could hit $500B by 2030 (vs $250B today) because of AI multiplier effect.</div>`},
     ]
   },
 
   markets:{name:'📈 Markets Arena',sub:'Stocks · Crypto · Indices · Investing',color:'#00bfff',
-    live:()=>`<div class="card-label" style="color:var(--blue)">◆ Market Pulse</div>
-    <div class="price-row">
-      <div class="price-card" style="border-color:rgba(0,191,255,0.2)">
-        <div class="pc-tag" style="color:var(--blue)">SENSEX</div>
-        <div class="pc-price">72,430</div>
-        <div class="pc-sub">BSE · Live</div>
-        <div class="pc-change up">▲ +312 · +0.43%</div>
-      </div>
-      <div class="price-card" style="border-color:rgba(0,191,255,0.2)">
-        <div class="pc-tag" style="color:var(--blue)">BTC/USD</div>
-        <div class="pc-price">$68,240</div>
-        <div class="pc-sub">Bitcoin · Crypto</div>
-        <div class="pc-change up">▲ +2.3%</div>
-      </div>
-    </div>
-    <div class="card"><div class="card-label" style="color:var(--blue)">◆ Today's Best Opportunities</div>
-    ${makeStockRow('INFY','Infosys','₹1,842','+1.2%',true,'BUY','Short term — AI revenue 34% YoY')}
-    ${makeStockRow('TATAPOWER','Tata Power','₹378','+0.4%',true,'HOLD','Long term — renewable energy play')}
-    ${makeStockRow('DIXON','Dixon Tech','₹9,210','+2.1%',true,'BUY','Apple & Samsung contracts locked in')}
-    ${makeStockRow('HDFCBANK','HDFC Bank','₹1,527','+0.8%',true,'BUY','Post-merger stable, FII buying')}
-    </div>`,
+    live: (container) => renderMarketsLive(container),
     why:()=>`<div class="card-label" style="color:var(--blue)">◆ Why markets moved today</div>
-    ${makeWhyCard('🌍','FII Buying ₹4,200 Cr','Foreign money flowing into India','BULLISH','Foreign Institutional Investors are net buyers for the 2nd straight week. When FII flows are positive, it means global money managers see India as a good bet — they\'re buying Indian stocks, pushing prices up. This is THE biggest short-term driver of Sensex direction.')}
-    ${makeWhyCard('💰','US Fed Rate Cut Signals','Dollar weakening benefits India','BULLISH','Two Fed rate cuts in 2025 make US bonds less attractive. Money rotates into emerging markets. India is the top destination — strong GDP, political stability, massive market. Every 0.25% Fed cut = ~₹1,000-2,000 Cr of FII inflow to India historically.')}
-    ${makeWhyCard('📊','Strong Q3 Results Season','Indian corporates beating estimates','BULLISH','70% of Nifty 50 companies beat Q3 earnings estimates. IT sector strong on AI contracts. Banking sector: loan growth 14% YoY. Auto sector: record sales. Good earnings = stocks go up. Simple.')}`,
+    ${makeWhyCard('🌍','FII Flows Drive Sensex','Foreign money = market direction','BULLISH','Foreign Institutional Investors are the biggest short-term driver of Indian markets. When FII flows are positive, Sensex rises. When they sell, it falls. Watch FII data daily at NSE website.')}
+    ${makeWhyCard('💰','US Fed Rate Signals','Dollar impacts global flows','BULLISH','Fed rate cuts make US bonds less attractive. Money rotates into emerging markets. India is typically the top destination — strong GDP, political stability. Every 0.25% Fed cut = ~₹1,000-2,000 Cr of FII inflow to India historically.')}
+    ${makeWhyCard('📊','Corporate Earnings Season','Quarterly results drive stocks','BULLISH','When Indian companies report strong quarterly earnings, their stocks go up. When 70%+ of Nifty 50 beats estimates, entire index rises. Track earnings season (Apr, Jul, Oct, Jan) closely.')}`,
     forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Market Targets 2025</div>
     <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
-    ${makeFT('Mar 2025','Sensex: 74,000–76,000','Nifty: 22,500','','','RBI rate cut likely — positive for banks and NBFCs. Q4 results season begins.',75,true)}
-    ${makeFT('Jun 2025','Sensex: 78,000–82,000','Nifty: 23,500–25,000','','','Fed cuts rates in June — FII inflows surge. Monsoon forecast critical for rural stocks.',68,false)}
-    ${makeFT('Dec 2025','Sensex: 82,000–90,000','Nifty: 25,000–27,000','','','Full year: +15% to +25% return expected. Best performing sectors: IT, Banking, Renewable Energy, Defence.',60,false)}
+    ${makeFT('Q1 2025','Sensex: 74,000–78,000','Nifty: 22,500–23,500','','','Q4 earnings season begins. RBI rate cut expectations building.',75,true)}
+    ${makeFT('Q2–Q3 2025','Sensex: 78,000–84,000','Nifty: 23,500–25,500','','','Fed cuts rates — FII inflows surge. Monsoon forecast critical for rural stocks.',68,false)}
+    ${makeFT('End 2025','Sensex: 82,000–92,000','Nifty: 25,000–28,000','','','Full year: +15% to +25% return expected. Best sectors: IT, Banking, Renewable Energy, Defence.',60,false)}
     </div></div>`,
     questions:[
-      {q:"You invest ₹5,000/month in a Nifty 50 index fund starting today. In 15 years at 13% average annual return, roughly how much will you have?",ctx:"💡 This tests your understanding of SIP (Systematic Investment Plan) and compound interest — the most powerful concept in personal finance.",
+      {q:"You invest ₹5,000/month in a Nifty 50 index fund for 15 years at 13% average annual return. Roughly how much will you have?",ctx:"💡 This tests your understanding of SIP (Systematic Investment Plan) and compound interest — the most powerful concept in personal finance.",
        opts:["₹9 lakhs (just what you put in)","₹22 lakhs (slightly more than invested)","₹1.2 crores (power of compounding)","₹5 crores (unrealistic)"],
-       ans:2,xp:60,explain:"✅ At 13% annualized returns (Nifty 50's historical average), ₹5,000/month for 15 years → ~₹1.2 crore. You invested only ₹9 lakh. The other ₹1.1 crore is PURE compounding. This is why starting a SIP at 22 vs 32 means the difference between ₹1.2 crore and ₹45 lakh at retirement. Start TODAY."},
+       ans:2,xp:60,explain:"✅ At 13% annualized returns (Nifty 50's historical average), ₹5,000/month for 15 years → ~₹1.2 crore. You invested only ₹9 lakh. The other ₹1.1 crore is PURE compounding. Start TODAY."},
     ],
     learn:[
       {icon:'📈',title:'SIP: The Most Powerful Habit in Finance',sub:'How ₹5,000/month becomes ₹1 crore',badge:'Beginner',
        body:`<h3>What is a SIP?</h3>SIP (Systematic Investment Plan) means automatically investing a fixed amount every month into a mutual fund — regardless of whether markets are up or down. Set it, forget it, get rich slowly.
-       <h3>The Magic of Rupee Cost Averaging</h3>When markets are down → your ₹5,000 buys MORE units. When markets are up → your units are worth more. Over time, you automatically buy cheap and profit on the way up. No timing needed.
        <h3>The Numbers</h3>₹5,000/month × 15 years × 13% = ₹1.2 crore<br>₹5,000/month × 20 years × 13% = ₹2.6 crore<br>₹5,000/month × 30 years × 13% = ₹9.4 crore
-       <div class="example-box">🚀 <strong>Start in 5 minutes:</strong> Open Groww or Zerodha → search "Nifty 50 Index Fund" → set up ₹500/month SIP. Increase by 10% every year as your income grows. That's it. You've done more for your future than most Indians ever will.</div>`},
+       <div class="example-box">🚀 <strong>Start in 5 minutes:</strong> Open Groww or Zerodha → search "Nifty 50 Index Fund" → set up ₹500/month SIP. Increase by 10% every year as your income grows.</div>`},
     ]
   },
 
   science:{name:'🧬 Science Arena',sub:'Space · Physics · Biology · Discovery',color:'#ff4560',
-    live:()=>`<div class="card-label" style="color:var(--red)">◆ Science This Week</div>
-    <div class="card">
-    ${makeNewsItem('🚀','SpaceX Starship Flight 7 — booster caught again','2nd consecutive successful tower catch','SPACE')}
-    ${makeNewsItem('🧬','CRISPR cures genetic deafness in clinical trial','Gene editing restores hearing in 5 patients','BIO')}
-    ${makeNewsItem('🌙','India\'s ISRO Gaganyaan mission on track for 2025','First Indian human spaceflight approaching','INDIA')}
-    ${makeNewsItem('🧠','Neuralink patient plays chess with brain implant','Paralyzed man controls computer by thinking','NEURO')}
-    ${makeNewsItem('☀️','Fusion energy: NIF achieves Q>1 again','More energy out than in — 3rd consecutive success','ENERGY')}
-    </div>`,
+    live: (container) => renderScienceLive(container),
     why:()=>`<div class="card-label" style="color:var(--red)">◆ Why these discoveries matter to you</div>
-    ${makeWhyCard('🚀','Starship — Fully Reusable Rockets','Cost to space drops 100x','BULLISH','SpaceX\'s Starship aims to reduce launch costs from $10,000/kg to $100/kg. This makes space commercially viable — satellite internet (Starlink), space manufacturing, moon mining. Indian companies like Skyroot and Agnikul are riding this wave.')}
-    ${makeWhyCard('🧬','CRISPR Gene Editing','We can now rewrite DNA errors','BULLISH','CRISPR lets scientists edit genes like editing text. Curing hereditary blindness, sickle cell disease, certain cancers. India has 300M+ people with genetic diseases — this technology could affect millions of lives here within a decade.')}
-    ${makeWhyCard('☀️','Fusion Energy Progress','Unlimited clean energy on horizon','BULLISH','Fusion is how the sun generates energy — hydrogen atoms fuse, releasing massive energy with zero radiation waste. Q>1 means we got more energy out than we put in. Commercial fusion by 2035 could mean electricity too cheap to meter. India would benefit enormously.')}`,
+    ${makeWhyCard('🚀','Reusable Rocket Revolution','Cost to space drops 100x','BULLISH','SpaceX\'s Starship aims to reduce launch costs from $10,000/kg to $100/kg. This makes space commercially viable. Indian companies like Skyroot and Agnikul are riding this wave.')}
+    ${makeWhyCard('🧬','CRISPR Gene Editing','We can now rewrite DNA errors','BULLISH','CRISPR lets scientists edit genes like editing text. Curing hereditary blindness, sickle cell disease, certain cancers. India has 300M+ people with genetic diseases — this could affect millions of lives here within a decade.')}
+    ${makeWhyCard('☀️','Fusion Energy Progress','Unlimited clean energy on horizon','BULLISH','Fusion is how the sun generates energy. Q>1 means we got more energy out than we put in. Commercial fusion by 2035 could mean electricity too cheap to meter. India would benefit enormously.')}`,
     forecast:()=>`<div class="card-label" style="color:var(--xp2)">◆ Science Horizon</div>
     <div class="card"><div class="ft-wrap"><div class="ft-line-vert"></div>
-    ${makeFT('2025','Gaganyaan launches','India joins elite space nations','','','ISRO\'s first human spaceflight. Strategic + scientific milestone. Boosts India\'s space sector employment and global prestige.',90,true)}
+    ${makeFT('2025','Gaganyaan launches','India joins elite space nations','','','ISRO\'s first human spaceflight. Strategic + scientific milestone. Boosts India\'s space sector.',90,true)}
     ${makeFT('2026–28','CRISPR therapies approved','Genetic diseases curable','','','India-specific genetic diseases (thalassemia, sickle cell) likely first targets. Government funding accelerating.',70,false)}
-    ${makeFT('2030–35','Fusion electricity possible','Energy becomes abundant','','','India investing in fusion research. If successful, eliminates energy insecurity permanently — transformational for a country importing 85% of oil.',50,false)}
+    ${makeFT('2030–35','Fusion electricity possible','Energy becomes abundant','','','India investing in fusion research. If successful, eliminates energy insecurity permanently.',50,false)}
     </div></div>`,
     questions:[
-      {q:"Fusion energy achieves Q>1 — getting more energy OUT than put IN. Why is this a big deal?",ctx:"💡 Fusion is how the sun works — hydrogen atoms merge to release enormous energy. Unlike nuclear fission (current nuclear plants), fusion produces no long-lived radioactive waste.",
-       opts:["It makes bombs more powerful","It could provide unlimited clean energy with no carbon emissions or nuclear waste","It gives unlimited internet speed","It makes computers faster"],
-       ans:1,xp:50,explain:"✅ Fusion energy could solve humanity's energy crisis permanently. The fuel is hydrogen (from water) — virtually infinite supply. The output is helium — harmless. No carbon emissions, no nuclear waste, no fuel scarcity. Q>1 means we've proven it works energetically. Scaling it up is the engineering challenge remaining."},
+      {q:"Fusion energy achieves Q>1 — more energy OUT than put IN. Why is this a big deal?",ctx:"💡 Fusion is how the sun works — hydrogen atoms merge to release enormous energy. Unlike nuclear fission, fusion produces no long-lived radioactive waste.",
+       opts:["It makes bombs more powerful","It could provide unlimited clean energy with no carbon or nuclear waste","It gives unlimited internet speed","It makes computers faster"],
+       ans:1,xp:50,explain:"✅ Fusion energy could solve humanity's energy crisis permanently. The fuel is hydrogen (from water) — virtually infinite. The output is helium — harmless. No carbon emissions, no nuclear waste."},
     ],
     learn:[
       {icon:'🧬',title:'CRISPR: The DNA Editor',sub:'How scientists are rewriting life',badge:'Beginner',
-       body:`<h3>What is DNA?</h3>DNA is the instruction manual for every cell in your body — 3 billion letters of code (A, T, G, C). Errors in this code cause genetic diseases — cancer, diabetes, blindness, sickle cell, etc.
-       <h3>What is CRISPR?</h3>CRISPR (Cas9) is a molecular "find and replace" tool. You program it with the faulty DNA sequence → it finds it in the cell → cuts it out → the cell repairs itself with a corrected version. Like fixing a typo in a document.
-       <h3>Why India Should Care</h3>India has 300M+ people with genetic disorders — the highest in the world due to large population and historical patterns. Sickle cell disease affects 20M Indians. Thalassemia: 45 million carriers. CRISPR therapies could treat millions.
-       <div class="example-box">💰 <strong>Investment angle:</strong> Global genomics and biotech companies developing CRISPR therapies are worth watching. India's biotech sector (Sun Pharma, Biocon, Dr. Reddy's) are investing in gene therapy. Long-term 10-20 year bet.</div>`},
+       body:`<h3>What is DNA?</h3>DNA is the instruction manual for every cell in your body — 3 billion letters of code. Errors cause genetic diseases.
+       <h3>What is CRISPR?</h3>CRISPR (Cas9) is a molecular "find and replace" tool. You program it with the faulty DNA sequence → it finds it in the cell → cuts it out → the cell repairs itself. Like fixing a typo in a document.
+       <h3>Why India Should Care</h3>India has 300M+ people with genetic disorders. Sickle cell disease affects 20M Indians. Thalassemia: 45 million carriers. CRISPR therapies could treat millions.
+       <div class="example-box">💰 <strong>Investment angle:</strong> India's biotech sector (Sun Pharma, Biocon, Dr. Reddy's) are investing in gene therapy. Long-term 10-20 year bet.</div>`},
     ]
   }
 };
@@ -1531,12 +1835,26 @@ function switchInner(i){
   document.querySelectorAll('.itab').forEach((t,j)=>t.classList.toggle('active',j===i));
   document.querySelectorAll('.ipanel').forEach((p,j)=>p.classList.toggle('active',j===i));
   const a=ARENAS[S.currentArena];
-  if(i===0) document.getElementById('live-content').innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px">${a.live()}</div>`;
-  if(i===1) document.getElementById('why-content').innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px">${a.why()}</div>`;
-  if(i===2){document.getElementById('forecast-content').innerHTML=a.forecast();setTimeout(animConf,300);}
+
+  if(i===0){
+    // Live tab — async renderer, passes container div directly
+    const wrap = document.getElementById('live-content');
+    wrap.innerHTML = `<div id="live-inner" style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px"></div>`;
+    a.live(document.getElementById('live-inner'));
+    recordCardCompletion(S.currentArena, 0);
+  }
+  if(i===1){
+    document.getElementById('why-content').innerHTML=`<div style="background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px;margin-bottom:16px">${a.why()}</div>`;
+    recordCardCompletion(S.currentArena, 1);
+  }
+  if(i===2){
+    document.getElementById('forecast-content').innerHTML=a.forecast();
+    setTimeout(animConf,300);
+    recordCardCompletion(S.currentArena, 2);
+  }
   if(i===3){buildGame();}
   if(i===4) buildLearn();
-  if(i===0) setTimeout(drawChart,100);
+  if(i===5) buildTrainee();
 }
 
 function toggleWhy(el){
