@@ -959,15 +959,10 @@ async function saveState() {
 // LS used as offline cache; reconcile on every login using MAX values
 async function loadUserProfile(user) {
   const uname = user.user_metadata?.username || user.email.split('@')[0];
-  // Detect USER SWITCH: different user_id → clear their cached local data to prevent contamination
-  const storedUid = localStorage.getItem('wiq_uid');
-  if (storedUid && storedUid !== user.id) {
-    // Different user — clear only profile XP data, not quest/streak (they're date-gated anyway)
-    ['wiq_xp','wiq_level','wiq_correct','wiq_highscores','wiq_completed_cards','wiq_achievements','wiq_trainee_progress'].forEach(k => localStorage.removeItem(k));
-    S.xp = 0; S.level = 1; S.totalCorrect = 0;
-    console.log('[WIQ] User switch detected — local profile cache cleared for new user');
-  }
-  // Always stamp current uid so same-user relogins DON'T wipe LS cache
+  // [v2.1 FIX] Removed client-side user-switch detection — it was incorrectly
+  // wiping data for the same user. The server reconciliation (MAX logic below)
+  // safely handles all cases: same user re-login, new user, offline play.
+  // Just stamp the UID for informational purposes only — never use it to wipe data.
   localStorage.setItem('wiq_uid', user.id);
   try {
     if (!window.supabaseClient) { showApp(uname); return; }
