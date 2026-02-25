@@ -2391,33 +2391,34 @@ function addXP(amount) {
 }
 
 function updateXPBar() {
-  const lv    = getLevelFromXP(S.xp);
-  S.level     = lv;
-  const withinLv = xpWithinLevel(S.xp);
-  const neededLv = xpForCurrentLevel(S.xp);
-  const pct   = Math.min(100, Math.round(withinLv / neededLv * 100));
-  const fill  = document.getElementById('xp-fill');
-  const val   = document.getElementById('xp-val');
-  const lvEl  = document.getElementById('lv-num');
-  const str   = document.getElementById('str-num');
-  const xpLbl = document.getElementById('xp-label');
-  if (fill) fill.style.width = pct + '%';
-  if (val)  val.textContent  = S.xp;
-  if (lvEl) lvEl.textContent = lv;
-  const lvInline = document.getElementById('lv-inline');
-  if (lvInline) lvInline.textContent = lv;
-  if (str)  str.textContent  = S.streak;
-  // Update XP bar tooltip to show progress within level
-  const xpWrap = document.querySelector('.xp-wrap');
-  if (xpWrap) xpWrap.title = `${withinLv}/${neededLv} XP — Level ${lv}: ${getLevelTitle(lv)}`;
-  const lvIcon = document.getElementById('lv-icon');
-  if (lvIcon) {
-    const icons = ['🌱','🌱','📰','📰','📊','📊','🌍','🌍','🧠','🧠','💎','💎','🏆'];
-    lvIcon.textContent = icons[Math.min(lv, icons.length-1)];
+  try {
+    const xpFill = document.getElementById("xp-fill");
+    const xpVal = document.getElementById("xp-val");
+    const lvInline = document.getElementById("lv-inline");
+    const lvNum = document.getElementById("lv-num");
+    const strNum = document.getElementById("str-num");
+    const lvIcon = document.getElementById("lv-icon");
+    const xpWrap = document.querySelector('.xp-wrap');
+    const XP = S.xp;
+    const LEVEL = getLevelFromXP(XP);
+    S.level = LEVEL;
+    const requiredXP = LEVEL * 100;
+    const currentLevelXP = XP % requiredXP;
+    const percent = (currentLevelXP / requiredXP) * 100;
+    if (xpFill) xpFill.style.width = percent + "%";
+    if (xpVal) xpVal.innerText = XP;
+    if (lvInline) lvInline.innerText = LEVEL;
+    if (lvNum) lvNum.innerText = LEVEL;
+    if (strNum) strNum.innerText = S.streak;
+    if (lvIcon) {
+      const icons = ['🌱','🌱','📰','📰','📊','📊','🌍','🌍','🧠','🧠','💎','💎','🏆'];
+      lvIcon.textContent = icons[Math.min(LEVEL, icons.length-1)];
+    }
+    if (xpWrap) xpWrap.title = `${currentLevelXP}/${requiredXP} XP — Level ${LEVEL}: ${getLevelTitle(LEVEL)}`;
+    if (xpVal) xpVal.title = `Total: ${XP} XP | Level ${LEVEL}: ${currentLevelXP}/${requiredXP} XP`;
+  } catch (err) {
+    console.error("XP bar update failed:", err);
   }
-  // Update XP bar tooltip
-  const xpValEl = document.getElementById('xp-val');
-  if (xpValEl) xpValEl.title = `Total: ${S.xp} XP | Level ${lv}: ${withinLv}/${neededLv} XP`;
 }
 
 let _toastTimer = null;
