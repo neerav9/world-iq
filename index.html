@@ -1016,10 +1016,12 @@ async function loadUserProfile(user) {
       localStorage.setItem('wiq_correct', String(S.totalCorrect));
       // If local had MORE xp (offline play since last login) — push to server
       if (S.xp > (data.xp || 0) || S.level > (data.level || 1)) {
-        supabaseClient.from('profiles').upsert({
-          user_id: user.id, xp: S.xp, level: S.level,
-          total_correct: S.totalCorrect, updated_at: new Date().toISOString()
-        }, { onConflict: 'user_id' }).catch(() => {});
+        (async () => { try {
+          await supabaseClient.from('profiles').upsert({
+            user_id: user.id, xp: S.xp, level: S.level,
+            total_correct: S.totalCorrect, updated_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+        } catch (e) { console.warn('[WIQ] Background sync:', e.message); } })();
       }
       showApp(data.username || uname);
     } else {
@@ -1688,7 +1690,7 @@ const ARENAS = {
       <div class="card" style="border-color:rgba(168,85,247,0.2);margin-bottom:20px">
         <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.12);border-radius:10px;padding:12px;font-size:12px;color:#6070a0;margin-bottom:16px">⚠️ <strong style="color:var(--text)">Disclaimer:</strong> Forecasts are analyst consensus & macro models. Not financial advice.</div>
         <div class="ft-wrap"><div class="ft-line-vert"></div>
-        ${makeFT('NOW (Today)', window._liveGold ? '₹'+window._liveGold.goldInr.toLocaleString('en-IN') : 'See Live tab', window._liveGold ? '$'+window._liveGold.goldUsd.toFixed(2)+'/oz' : '', '','','Current price. Check the Live tab for real-time data.',95,true)}
+        ${makeFT('NOW (Today)', window._liveGold ? '₹'+window._liveGold.goldPer10g.toLocaleString('en-IN') : 'See Live tab', window._liveGold ? '$'+window._liveGold.goldUsd.toFixed(2)+'/oz' : '', '','','Current price. Check the Live tab for real-time data.',95,true)}
         ${makeFT('1 MONTH','Target: +2–4%','Analyst consensus','',true,'Fed rate cut expectations building. Dollar weakening trend continues. Watch DXY closely.',78,false)}
         ${makeFT('3 MONTHS','Target: +5–10%','Seasonal buying in India','',true,'Monsoon season typically raises Indian gold buying. Uncertainty historically spikes gold.',72,false)}
         ${makeFT('6 MONTHS','Target: +10–18%','Bull cycle mid-phase','',true,'Fed rate cuts likely begin Q3. Geopolitical tensions unpredictable. Solar/EV industrial silver demand accelerating.',65,false)}
