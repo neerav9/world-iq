@@ -306,19 +306,23 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .drag-game-wrap{background:var(--card);border:1px solid rgba(168,85,247,0.2);border-radius:20px;padding:22px;margin-bottom:20px}
 .drag-title{font-family:var(--ffh);font-size:18px;font-weight:700;margin-bottom:6px;letter-spacing:0.04em}
 .drag-prompt{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6}
-.drag-columns{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.drag-columns{display:grid;grid-template-columns:1fr 44px 1fr;gap:0;margin-bottom:16px;align-items:start}
 .drag-col-title{font-family:var(--ffm);font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
 .drag-items{display:flex;flex-direction:column;gap:8px}
-.drag-item{padding:10px 14px;border-radius:10px;border:1.5px solid rgba(168,85,247,0.3);background:rgba(124,58,237,0.08);font-size:13px;font-weight:600;cursor:grab;transition:all 0.2s;user-select:none}
-.drag-item:hover{border-color:var(--xp2);transform:scale(1.02)}
-.drag-item.dragging{opacity:0.4;cursor:grabbing}
-.drag-item.matched{border-color:var(--green);background:rgba(0,230,118,0.08);cursor:default;color:var(--green)}
+.drag-svg-col{position:relative}
+.drag-item{padding:9px 12px;border-radius:10px;border:1.5px solid rgba(168,85,247,0.3);background:rgba(124,58,237,0.08);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.2s;user-select:none;min-height:44px;display:flex;align-items:center}
+.drag-item:hover{border-color:var(--xp2);background:rgba(124,58,247,0.14)}
+.drag-item.dragging{opacity:0.4}
+.drag-item.selected{border-color:var(--gold);background:rgba(245,200,66,0.1);box-shadow:0 0 0 2px rgba(245,200,66,0.25)}
+.drag-item.matched{border-color:var(--green);background:rgba(0,230,118,0.08);color:var(--green)}
 .drag-item.wrong-match{border-color:var(--red);background:rgba(255,69,96,0.08);animation:shake 0.4s ease}
 @keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
-.drop-zone{padding:10px 14px;border-radius:10px;border:1.5px dashed var(--border);background:var(--card2);font-size:13px;color:var(--muted);min-height:44px;transition:all 0.2s;display:flex;align-items:center}
-.drop-zone.drag-over{border-color:var(--xp2);background:rgba(124,58,237,0.06);color:var(--text)}
-.drop-zone.filled{border-style:solid;border-color:rgba(0,230,118,0.3);background:rgba(0,230,118,0.06);color:var(--green)}
-.drop-zone.wrong{border-color:rgba(255,69,96,0.4);background:rgba(255,69,96,0.06);animation:shake 0.4s ease}
+.drop-zone{padding:9px 12px;border-radius:10px;border:1.5px dashed var(--border);background:var(--card2);font-size:12px;color:var(--muted);min-height:44px;transition:all 0.2s;display:flex;align-items:center;cursor:pointer}
+.drop-zone:hover{border-color:rgba(168,85,247,0.35)}
+.drop-zone.drag-over{border-color:var(--xp2);background:rgba(124,58,237,0.08);color:var(--text)}
+.drop-zone.matched-target{border-style:solid;border-color:rgba(0,230,118,0.35);background:rgba(0,230,118,0.06);color:var(--text)}
+.drop-zone.filled{border-style:solid;border-color:var(--green);background:rgba(0,230,118,0.1);color:var(--green)}
+.drop-zone.wrong{border-color:rgba(255,69,96,0.5);background:rgba(255,69,96,0.07);animation:shake 0.4s ease}
 .drag-submit-btn{padding:11px 28px;border-radius:12px;border:1px solid rgba(168,85,247,0.3);background:rgba(124,58,237,0.1);color:var(--xp2);font-family:var(--ffm);font-size:11px;letter-spacing:0.1em;cursor:pointer;transition:all 0.2s;margin-top:12px}
 .drag-submit-btn:hover{background:rgba(124,58,237,0.2)}
 
@@ -943,15 +947,15 @@ async function saveState() {
     localStorage.setItem('wiq_xp',      String(S.xp));
     localStorage.setItem('wiq_level',   String(S.level));
     localStorage.setItem('wiq_correct', String(S.totalCorrect));
-    await supabaseClient.from('profiles').upsert({
-      user_id:       user.id,
+    // Use UPDATE not upsert — profile already exists after first login
+    await supabaseClient.from('profiles').update({
       xp:            S.xp,
       level:         S.level,
       streak:        S.streak,
       total_correct: S.totalCorrect,
       achievements:  JSON.stringify(getAchievements()),
       updated_at:    new Date().toISOString()
-    }, { onConflict: 'user_id' });
+    }).eq('user_id', user.id);
   } catch (e) { console.warn('[WIQ] Sync (non-blocking):', e.message); }
 }
 
@@ -1012,10 +1016,10 @@ async function loadUserProfile(user) {
       // If local had MORE xp (offline play since last login) — push to server
       if (S.xp > (data.xp || 0) || S.level > (data.level || 1)) {
         (async () => { try {
-          await supabaseClient.from('profiles').upsert({
-            user_id: user.id, xp: S.xp, level: S.level,
+          await supabaseClient.from('profiles').update({
+            xp: S.xp, level: S.level,
             total_correct: S.totalCorrect, updated_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
+          }).eq('user_id', user.id);
         } catch (e) { console.warn('[WIQ] Background sync:', e.message); } })();
       }
       showApp(data.username || uname);
@@ -1114,18 +1118,38 @@ function renderAchievements() {
 async function getMetalPrices() {
   const cached = cacheGet('dyn_metals');
   if (cached) return cached;
-  try {
-    const res = await fetch('https://api.metals.live/v1/spot', { signal: AbortSignal.timeout(7000) });
-    const arr = await res.json();
-    const data = {};
-    arr.forEach(item => Object.assign(data, item));
-    cacheSet('dyn_metals', data, CACHE_TTL_PRICES);
-    return data;
-  } catch (e) {
-    console.warn('[WIQ] metals API failed', e);
-    const fallback = cacheGet('dyn_metals') || { gold: 2034, silver: 22.8, palladium: 1000, platinum: 950 };
-    return fallback;
+  // Try multiple free metal price sources
+  const METAL_APIS = [
+    // metals.live
+    async () => {
+      const res = await fetch('https://api.metals.live/v1/spot', { signal: AbortSignal.timeout(6000) });
+      const arr = await res.json();
+      const d = {};
+      arr.forEach(item => Object.assign(d, item));
+      if (!d.gold || d.gold < 1000) throw new Error('Implausible gold price');
+      return d;
+    },
+    // metalpriceapi.com open endpoint (no key needed for spot)
+    async () => {
+      const res = await fetch('https://www.goldapi.io/api/XAU/USD', {
+        headers: { 'x-access-token': 'goldapi-demo' },
+        signal: AbortSignal.timeout(6000)
+      });
+      const j = await res.json();
+      if (!j.price || j.price < 1000) throw new Error('Bad gold response');
+      return { gold: j.price, silver: j.silver || 32, platinum: j.platinum || 990, palladium: j.palladium || 1000 };
+    },
+  ];
+  for (const fn of METAL_APIS) {
+    try {
+      const data = await fn();
+      cacheSet('dyn_metals', data, CACHE_TTL_PRICES);
+      return data;
+    } catch (e) { console.warn('[WIQ] metals API attempt failed:', e.message); }
   }
+  // All APIs failed — use stale cache or realistic hardcoded fallback
+  const stale = (() => { try { const r = localStorage.getItem('dyn_metals'); if (r) { const o = JSON.parse(r); return o.data; } } catch {} return null; })();
+  return stale || { gold: 2900, silver: 32.0, palladium: 1000, platinum: 990 };
 }
 // [FIX v2.1 - FIX 2] USD→INR with multi-endpoint fallback chain
 // Tries: Frankfurter → exchangerate.host → Open Exchange Rates (free) → stale cache → hardcoded
@@ -1185,15 +1209,19 @@ async function getIndianMetalPrices() {
   // Conversion formulas:
   // Gold: (price_per_troy_oz × usdInr) / 31.1035 × 10  → price per 10 grams
   // Silver: price_per_troy_oz × usdInr × 32.1507        → price per kg (1 troy oz = 0.0311035 kg; 1kg = 32.1507 troy oz)
-  const goldPer10g   = Math.round(goldUsd   * usdInr / 31.1035 * 10);
-  const goldPerGram  = Math.round(goldUsd   * usdInr / 31.1035);
-  const silverPerKg  = Math.round(silverUsd * usdInr * 32.1507);
-  const silverPer10g = Math.round(silverUsd * usdInr * 32.1507 / 100);
-  // Add approximate MCX premium (import duty ~15% + GST ~3% on gold; simplified)
-  // This gives a more realistic Indian market price vs pure spot
-  const MCX_PREMIUM = 1.05; // ~5% for simplicity (actual varies)
-  const mcxGold  = Math.round(goldPer10g  * MCX_PREMIUM);
-  const mcxSilver= Math.round(silverPerKg * MCX_PREMIUM);
+  // India gold pricing: spot USD/oz × INR rate / 31.1035g × 10g × India tax factor
+  // Import duty (Oct 2024 revised): 12.5% + AgriCess 5% on duty + GST 3% = ~15.7% effective
+  // Using 1.157 multiplier to match MCX real prices
+  const INDIA_TAX   = 1.157;
+  const goldPerGram  = Math.round(goldUsd   * usdInr / 31.1035 * INDIA_TAX);
+  const goldPer10g   = goldPerGram * 10;
+  // Silver: lower import duty (10%) + GST 3% = 1.13 effective
+  const SILVER_TAX   = 1.13;
+  const silverPerKg  = Math.round(silverUsd * usdInr * 32.1507 * SILVER_TAX);
+  const silverPer10g = Math.round(silverPerKg / 100);
+  // MCX values (same as per-gram with tax, MCX IS the Indian spot)
+  const mcxGold  = goldPer10g;
+  const mcxSilver= silverPerKg;
   const gsRatio  = (goldUsd / silverUsd).toFixed(1);
   const result = {
     goldUsd, silverUsd, platinumUsd, palladiumUsd, usdInr,
@@ -1997,98 +2025,239 @@ function showSummary() {
 }
 
 // ── DRAG & DROP GAME ─────────────────────────────────────
+// ── MATCH & CONNECT GAME (thread connector UI) ──────────
+// Both columns remain static; SVG lines connect matched pairs
+// Click left item to select, click right item to connect — shows a thread line
 function startDragGame() {
-  const pairs = ARENAS[S.currentArena].dragGame;
-  const seed = getDailySeed() + S.currentArena.charCodeAt(0) + 99;
+  const arena = S.currentArena;
+  const pairs = ARENAS[arena].dragGame;
+  const seed = getDailySeed() + arena.charCodeAt(0) + 99;
   const shuffledPairs = shuffleWithSeed(pairs.pairs, seed);
   const rightItems = shuffleWithSeed(shuffledPairs.map(p => p.right), seed + 7);
-  _dragState = { selected: null, matches: {}, correct: 0, pairs: shuffledPairs };
+  // matches[leftIdx] = rightIdx in the rightItems array
+  _dragState = { selected: null, matches: {}, pairs: shuffledPairs, rightItems };
 
   const el = document.getElementById('game-content');
   el.innerHTML = `
     <div class="drag-game-wrap">
       <div class="drag-title">🔗 Match & Connect</div>
       <div class="drag-prompt">${pairs.prompt}</div>
-      <div class="drag-columns">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;text-align:center">
+        👆 Click a <strong style="color:var(--xp2)">concept</strong> on the left, then click its matching <strong style="color:var(--gold)">definition</strong> on the right
+      </div>
+      <div class="drag-columns" id="drag-columns-wrap">
         <div>
           <div class="drag-col-title">Concept</div>
           <div class="drag-items" id="drag-left">
-            ${shuffledPairs.map((p, i) => `<div class="drag-item" id="drag-${i}" draggable="true" data-idx="${i}" ondragstart="dragStart(event,${i})" onclick="dragClick(${i})">${p.left}</div>`).join('')}
+            ${shuffledPairs.map((p, i) => `<div class="drag-item" id="drag-${i}" data-idx="${i}" onclick="dragClick(${i})" draggable="true" ondragstart="dragStart(event,${i})">${p.left}</div>`).join('')}
           </div>
+        </div>
+        <div class="drag-svg-col" id="drag-svg-col" style="position:relative">
+          <svg id="connector-svg" class="drag-connector-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;pointer-events:none"></svg>
         </div>
         <div>
           <div class="drag-col-title">Definition</div>
           <div class="drag-items" id="drag-right">
-            ${rightItems.map((r, i) => `<div class="drop-zone" id="drop-${i}" data-val="${r}" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropItem(event,${i})" onclick="dropClick(${i})">${r}</div>`).join('')}
+            ${rightItems.map((r, i) => `<div class="drop-zone" id="drop-${i}" data-val="${r}" data-ridx="${i}" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropItem(event,${i})" onclick="dropClick(${i})">${r}</div>`).join('')}
           </div>
         </div>
       </div>
-      <div id="drag-feedback" style="font-size:13px;color:var(--muted);text-align:center;min-height:24px;margin-bottom:8px"></div>
-      <button class="drag-submit-btn" onclick="checkDragAnswers()">Check Answers ✓</button>
+      <div id="drag-feedback" style="font-size:13px;color:var(--muted);text-align:center;min-height:24px;margin:8px 0"></div>
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <button class="drag-submit-btn" onclick="checkDragAnswers()">Check Answers ✓</button>
+        <button class="drag-submit-btn" style="border-color:rgba(255,69,96,0.3);color:var(--red)" onclick="clearDragMatches()">Clear All ✕</button>
+      </div>
     </div>`;
+  // Sync SVG height after render
+  requestAnimationFrame(syncDragSvgHeight);
+}
+
+function syncDragSvgHeight() {
+  const leftCol = document.getElementById('drag-left');
+  const rightCol = document.getElementById('drag-right');
+  const svgCol   = document.getElementById('drag-svg-col');
+  if (!leftCol || !svgCol) return;
+  const h = Math.max(leftCol.offsetHeight, rightCol ? rightCol.offsetHeight : 0);
+  svgCol.style.height = h + 'px';
+  const svg = document.getElementById('connector-svg');
+  if (svg) svg.setAttribute('height', h);
 }
 
 function dragStart(e, idx) {
-  e.dataTransfer.setData('text/plain', idx);
+  e.dataTransfer.setData('text/plain', String(idx));
   document.getElementById(`drag-${idx}`).classList.add('dragging');
 }
-function dragClick(idx) {
-  if (_dragState.selected === null) {
-    _dragState.selected = idx;
-    document.getElementById(`drag-${idx}`).style.borderColor = 'var(--gold)';
-  } else {
-    const prev = _dragState.selected;
-    document.getElementById(`drag-${prev}`).style.borderColor = '';
+
+function dragClick(leftIdx) {
+  // Deselect if clicking already-selected
+  if (_dragState.selected === leftIdx) {
+    document.getElementById(`drag-${leftIdx}`).classList.remove('selected');
     _dragState.selected = null;
+    return;
+  }
+  // Deselect previous
+  if (_dragState.selected !== null) {
+    document.getElementById(`drag-${_dragState.selected}`)?.classList.remove('selected');
+  }
+  // Select this left item (unless already matched)
+  if (!_dragState.matches.hasOwnProperty(leftIdx)) {
+    _dragState.selected = leftIdx;
+    document.getElementById(`drag-${leftIdx}`).classList.add('selected');
   }
 }
-function dropItem(e, dropIdx) {
+
+function dropItem(e, rightIdx) {
   e.preventDefault();
-  const dragIdx = parseInt(e.dataTransfer.getData('text/plain'));
+  const leftIdx = parseInt(e.dataTransfer.getData('text/plain'));
   document.querySelectorAll('.drag-item').forEach(d => d.classList.remove('dragging'));
-  document.getElementById(`drop-${dropIdx}`).classList.remove('drag-over');
-  _dragState.matches[dropIdx] = dragIdx;
-  document.getElementById(`drop-${dropIdx}`).textContent = _dragState.pairs[dragIdx].left + ' →';
+  document.getElementById(`drop-${rightIdx}`).classList.remove('drag-over');
+  connectMatch(leftIdx, rightIdx);
 }
-function dropClick(dropIdx) {
+
+function dropClick(rightIdx) {
   if (_dragState.selected === null) return;
-  const dragIdx = _dragState.selected;
-  document.getElementById(`drag-${dragIdx}`).style.borderColor = '';
+  const leftIdx = _dragState.selected;
   _dragState.selected = null;
-  _dragState.matches[dropIdx] = dragIdx;
-  // Show the match visually
-  document.getElementById(`drop-${dropIdx}`).textContent = document.getElementById(`drag-${dragIdx}`).textContent;
-  document.getElementById(`drop-${dropIdx}`).style.borderColor = 'rgba(168,85,247,0.4)';
+  document.getElementById(`drag-${leftIdx}`)?.classList.remove('selected');
+  connectMatch(leftIdx, rightIdx);
 }
+
+function connectMatch(leftIdx, rightIdx) {
+  // Remove any existing match for this left item
+  if (_dragState.matches.hasOwnProperty(leftIdx)) {
+    const oldRight = _dragState.matches[leftIdx];
+    document.getElementById(`drop-${oldRight}`)?.classList.remove('matched-target');
+  }
+  // Remove any existing match pointing to this right slot
+  for (const [li, ri] of Object.entries(_dragState.matches)) {
+    if (ri === rightIdx) {
+      delete _dragState.matches[li];
+      document.getElementById(`drag-${li}`)?.classList.remove('matched');
+    }
+  }
+  _dragState.matches[leftIdx] = rightIdx;
+  document.getElementById(`drag-${leftIdx}`)?.classList.add('matched');
+  document.getElementById(`drop-${rightIdx}`)?.classList.add('matched-target');
+  drawConnectors();
+}
+
+const THREAD_COLORS = ['#a855f7','#f5c842','#00bfff','#00e676','#ff8c42'];
+
+function drawConnectors() {
+  const svg = document.getElementById('connector-svg');
+  if (!svg) return;
+  syncDragSvgHeight();
+  svg.innerHTML = '';
+  const svgRect = svg.getBoundingClientRect();
+
+  Object.entries(_dragState.matches).forEach(([leftIdx, rightIdx], i) => {
+    const leftEl  = document.getElementById(`drag-${leftIdx}`);
+    const rightEl = document.getElementById(`drop-${rightIdx}`);
+    if (!leftEl || !rightEl) return;
+
+    const lr = leftEl.getBoundingClientRect();
+    const rr = rightEl.getBoundingClientRect();
+
+    // Right edge of left item → left edge of right item (relative to SVG)
+    const x1 = lr.right  - svgRect.left;
+    const y1 = lr.top    - svgRect.top  + lr.height / 2;
+    const x2 = rr.left   - svgRect.left;
+    const y2 = rr.top    - svgRect.top  + rr.height / 2;
+
+    // Bezier control points for a smooth S-curve
+    const cx = (x1 + x2) / 2;
+    const color = THREAD_COLORS[i % THREAD_COLORS.length];
+
+    // Shadow/glow path
+    const glow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    glow.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
+    glow.setAttribute('stroke', color);
+    glow.setAttribute('stroke-width', '6');
+    glow.setAttribute('opacity', '0.15');
+    glow.setAttribute('fill', 'none');
+    glow.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(glow);
+
+    // Main thread line
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`);
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', '2.5');
+    path.setAttribute('opacity', '0.85');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    // Animated dash
+    const totalLen = 200;
+    path.setAttribute('stroke-dasharray', totalLen);
+    path.setAttribute('stroke-dashoffset', totalLen);
+    path.style.transition = 'stroke-dashoffset 0.4s ease';
+    svg.appendChild(path);
+    requestAnimationFrame(() => { path.setAttribute('stroke-dashoffset', '0'); });
+
+    // Dot at start
+    const dot1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot1.setAttribute('cx', x1); dot1.setAttribute('cy', y1); dot1.setAttribute('r', '4');
+    dot1.setAttribute('fill', color); dot1.setAttribute('opacity', '0.9');
+    svg.appendChild(dot1);
+
+    // Dot at end
+    const dot2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot2.setAttribute('cx', x2); dot2.setAttribute('cy', y2); dot2.setAttribute('r', '4');
+    dot2.setAttribute('fill', color); dot2.setAttribute('opacity', '0.9');
+    svg.appendChild(dot2);
+  });
+}
+
+function clearDragMatches() {
+  _dragState.matches = {};
+  _dragState.selected = null;
+  document.querySelectorAll('.drag-item').forEach(el => el.classList.remove('matched','selected','wrong-match'));
+  document.querySelectorAll('.drop-zone').forEach(el => el.classList.remove('matched-target','filled','wrong'));
+  const svg = document.getElementById('connector-svg');
+  if (svg) svg.innerHTML = '';
+  const fb = document.getElementById('drag-feedback');
+  if (fb) fb.innerHTML = '';
+}
+
 function checkDragAnswers() {
   const pairs = _dragState.pairs;
-  const rightZones = document.querySelectorAll('.drop-zone');
   let correct = 0;
-  rightZones.forEach((zone, dropIdx) => {
-    const dragIdx = _dragState.matches[dropIdx];
-    if (dragIdx === undefined) return;
-    const leftItem = pairs[dragIdx].left;
-    const expectedRight = pairs[dragIdx].right;
-    const zoneVal = zone.getAttribute('data-val');
-    if (zoneVal === expectedRight) {
-      zone.classList.add('filled');
-      document.getElementById(`drag-${dragIdx}`)?.classList.add('matched');
+  const total  = pairs.length;
+  // Check each match
+  Object.entries(_dragState.matches).forEach(([leftIdxStr, rightIdx]) => {
+    const leftIdx  = parseInt(leftIdxStr);
+    const leftItem = pairs[leftIdx];
+    const rightVal = _dragState.rightItems[rightIdx];
+    const isCorrect = leftItem.right === rightVal;
+    const leftEl  = document.getElementById(`drag-${leftIdx}`);
+    const rightEl = document.getElementById(`drop-${rightIdx}`);
+    if (isCorrect) {
       correct++;
+      leftEl?.classList.add('matched');
+      rightEl?.classList.remove('matched-target');
+      rightEl?.classList.add('filled');
     } else {
-      zone.classList.add('wrong');
-      setTimeout(() => zone.classList.remove('wrong'), 600);
+      leftEl?.classList.add('wrong-match');
+      rightEl?.classList.add('wrong');
+      setTimeout(() => {
+        leftEl?.classList.remove('wrong-match');
+        rightEl?.classList.remove('wrong');
+      }, 700);
     }
   });
-  const total = pairs.length;
+  // Redraw connectors with final state
+  drawConnectors();
   const fb = document.getElementById('drag-feedback');
   if (correct === total) {
     fb.innerHTML = `<span style="color:var(--green)">✅ Perfect! All ${total} matches correct!</span>`;
     const { awarded, isNewHS } = processGameXP(S.currentArena + '_drag', total * 50);
-    if (awarded > 0) showLevelUp(`Drag & Drop Ace! +${awarded} XP`);
+    if (awarded > 0) showLevelUp(`Match Master! +${awarded} XP`);
     unlockAchievement('quiz_pro');
     saveState();
+  } else if (Object.keys(_dragState.matches).length < total) {
+    fb.innerHTML = `<span style="color:var(--muted)">Match all ${total} pairs first, then check!</span>`;
   } else {
-    fb.innerHTML = `<span style="color:var(--orange)">${correct}/${total} correct — keep trying!</span>`;
+    fb.innerHTML = `<span style="color:var(--orange)">${correct}/${total} correct — wrong connections shown in red. Try again!</span>`;
   }
 }
 
