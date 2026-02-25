@@ -1051,14 +1051,25 @@ async function saveState() {
     localStorage.setItem('wiq_level',   String(S.level));
     localStorage.setItem('wiq_correct', String(S.totalCorrect));
     // Use UPDATE not upsert — profile already exists after first login
-    await supabaseClient.from('profiles').update({
-      xp:            S.xp,
-      level:         S.level,
-      streak:        S.streak,
-      total_correct: S.totalCorrect,
-      achievements:  JSON.stringify(getAchievements()),
-      updated_at:    new Date().toISOString()
-    }).eq('user_id', user.id);
+    const payload = {
+      xp: Number(S.xp) || 0,
+      level: Number(S.level) || 1,
+      streak: Number(S.streak) || 1,
+      total_correct: Number(S.totalCorrect) || 0,
+      achievements: JSON.stringify(getAchievements()),
+      updated_at: new Date().toISOString()
+    };
+    console.log("User ID:", user.id);
+    console.log("Updating profile with:", payload);
+    const { error } = await supabaseClient
+      .from("profiles")
+      .update(payload)
+      .eq("user_id", user.id);
+    if (error) {
+      console.error("Supabase update error:", error);
+    } else {
+      console.log("Profile updated successfully");
+    }
   } catch (e) { console.warn('[WIQ] Sync (non-blocking):', e.message); }
 }
 
