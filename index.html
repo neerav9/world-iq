@@ -439,15 +439,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
     <div id="tb-username" style="font-size:11px;color:var(--muted);font-family:var(--ffm);letter-spacing:0.08em;">Guest</div>
   </div>
   <div class="tb-mid">
-    <div class="xp-wrap">
-      <div class="xp-label">XP</div>
-      <div class="xp-bar"><div class="xp-fill" id="xp-fill" style="width:0%"></div></div>
+    <div class="xp-wrap" onclick="showLvlModal()" style="cursor:pointer" title="Click to see level progress">
+      <div class="xp-label">LV<span id="lv-inline">1</span></div>
+      <div class="xp-bar" style="width:90px"><div class="xp-fill" id="xp-fill" style="width:0%"></div></div>
       <div class="xp-val" id="xp-val">0</div>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
-    <div class="level-badge" onclick="showLvlModal()">
-      <span class="lv-icon">⚡</span>
+    <div class="level-badge" onclick="showLvlModal()" id="level-badge-wrap" title="Click to see level details">
+      <span class="lv-icon" id="lv-icon">🌱</span>
       <span class="lv-num" id="lv-num">1</span>
       <span class="lv-label">LVL</span>
     </div>
@@ -880,7 +880,7 @@ function getChatReply(msg) {
 // wiq_uid — stores current user_id to detect user switches
 const S = {
   xp:          parseInt(localStorage.getItem('wiq_xp')      || '0'),
-  level:       parseInt(localStorage.getItem('wiq_level')   || '1'),
+  level:       1, // will be recalculated from XP after getLevelFromXP is defined
   streak:      1,
   questCount:  0,
   arenaXP:     0,
@@ -888,6 +888,8 @@ const S = {
   visitedArenas: new Set(),
   totalCorrect: parseInt(localStorage.getItem('wiq_correct') || '0'),
 };
+// Recalculate level from XP (getLevelFromXP defined above)
+S.level = getLevelFromXP(S.xp);
 
 // ── STREAK LOGIC (date-based) ────────────────────────────
 (function initStreak() {
@@ -922,7 +924,44 @@ const S = {
   visited.forEach(v => S.visitedArenas.add(v));
 })();
 
-const XP_PER_LEVEL = 200;
+// ── LEVEL SYSTEM ─────────────────────────────────────────
+// Level 1 needs 100 XP, Level 2 needs 200 more, Level 3 needs 300 more, etc.
+// Cumulative XP to reach level N: N*(N+1)/2 * 100
+// e.g. Lv1=100, Lv2=300, Lv3=600, Lv4=1000, Lv5=1500 ...
+function xpToReachLevel(n) {
+  if (n <= 1) return 0;
+  return (n - 1) * n / 2 * 100; // cumulative XP needed to START level n
+}
+function xpNeededForLevel(n) {
+  return n * 100; // XP needed to COMPLETE level n and advance
+}
+function getLevelFromXP(xp) {
+  // Find highest level N where xpToReachLevel(N) <= xp
+  // xpToReachLevel(N) = (N-1)*N/2*100
+  // Solve: (N-1)*N/2*100 <= xp → N^2-N-2xp/100 <= 0
+  const n = Math.floor((1 + Math.sqrt(1 + 8 * xp / 100)) / 2);
+  return Math.max(1, n);
+}
+function xpWithinLevel(xp) {
+  // XP earned within the current level (for the progress bar)
+  const lv = getLevelFromXP(xp);
+  return xp - xpToReachLevel(lv);
+}
+function xpForCurrentLevel(xp) {
+  // Total XP needed to complete the current level
+  const lv = getLevelFromXP(xp);
+  return xpNeededForLevel(lv);
+}
+function getLevelTitle(lv) {
+  if (lv <= 2)  return 'Curious Beginner 🌱';
+  if (lv <= 4)  return 'Market Watcher 📰';
+  if (lv <= 6)  return 'Informed Investor 📊';
+  if (lv <= 8)  return 'Finance Analyst 🌍';
+  if (lv <= 10) return 'World Strategist 🧠';
+  if (lv <= 15) return 'Intelligence Master 💎';
+  return 'World IQ Legend 🏆';
+}
+const XP_PER_LEVEL = 200; // legacy fallback, not used in new system
 
 // ── SUPABASE SYNC ────────────────────────────────────────
 // [FIX 1] saveState: always writes LS first (offline safe), then Supabase
@@ -991,50 +1030,58 @@ async function loadUserProfile(user) {
       localStorage.setItem('wiq_level', String(S.level));
       showApp(uname);
     } else if (!error && data) {
-      // [CORE FIX] Take MAX of server vs local to prevent any data loss
-      const localXP  = parseInt(localStorage.getItem('wiq_xp')     || '0');
-      const localLv  = parseInt(localStorage.getItem('wiq_level')   || '1');
-      const localCor = parseInt(localStorage.getItem('wiq_correct') || '0');
-      S.xp          = Math.max(data.xp           || 0, localXP);
-      S.level        = Math.max(data.level        || 1, localLv);
-      S.totalCorrect = Math.max(data.total_correct|| 0, localCor);
-      // Restore streak: take server value if it's based on the same date chain
-      if (data.streak && data.streak > S.streak) S.streak = data.streak;
-      // Merge achievements from server + local (union, no duplicates)
+      // [v2.2 FIX] SERVER IS ALWAYS THE SOURCE OF TRUTH on login.
+      // Never take MAX with localStorage — that causes XP from a previous user
+      // on the same device to bleed into the current user's account.
+      // localStorage is ONLY written after we load from server, so it always
+      // reflects this user's data for offline fallback.
+      S.xp          = data.xp           || 0;
+      S.level        = data.level        || 1;
+      S.totalCorrect = data.total_correct|| 0;
+      // Restore streak from server
+      if (data.streak) S.streak = data.streak;
+      // Restore achievements from server (authoritative), merge any local-only ones
       if (data.achievements) {
         try {
           const srvAch = JSON.parse(data.achievements);
           const locAch = getAchievements();
-          const merged = [...new Set([...srvAch, ...locAch])];
+          // Only merge local achievements if they belong to this UID
+          const storedUid = localStorage.getItem('wiq_uid');
+          const merged = storedUid === user.id ? [...new Set([...srvAch, ...locAch])] : srvAch;
           localStorage.setItem('wiq_achievements', JSON.stringify(merged));
         } catch {}
       }
-      // Write reconciled values to LS so they're available offline
+      // Overwrite LS with THIS user's server data — clears any previous user's cached data
+      localStorage.setItem('wiq_uid',     user.id);
       localStorage.setItem('wiq_xp',      String(S.xp));
       localStorage.setItem('wiq_level',   String(S.level));
       localStorage.setItem('wiq_correct', String(S.totalCorrect));
-      // If local had MORE xp (offline play since last login) — push to server
-      if (S.xp > (data.xp || 0) || S.level > (data.level || 1)) {
-        (async () => { try {
-          await supabaseClient.from('profiles').update({
-            xp: S.xp, level: S.level,
-            total_correct: S.totalCorrect, updated_at: new Date().toISOString()
-          }).eq('user_id', user.id);
-        } catch (e) { console.warn('[WIQ] Background sync:', e.message); } })();
-      }
+      // Recalculate level from XP in case of any drift
+      S.level = getLevelFromXP(S.xp);
+      localStorage.setItem('wiq_level', String(S.level));
       showApp(data.username || uname);
     } else {
-      // Unexpected error — still show app using local cache (never block the user)
-      S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
-      S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
-      S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+      // Unexpected error — only use local cache if it belongs to this same user
+      const storedUid = localStorage.getItem('wiq_uid');
+      if (storedUid === user.id) {
+        S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
+        S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
+        S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+      } else {
+        S.xp = 0; S.level = 1; S.totalCorrect = 0;
+      }
       showApp(uname);
     }
   } catch (e) {
     console.warn('[WIQ] Profile load failed — using local cache:', e.message);
-    S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
-    S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
-    S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+    const storedUid = localStorage.getItem('wiq_uid');
+    if (storedUid === user.id) {
+      S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
+      S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
+      S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+    } else {
+      S.xp = 0; S.level = 1; S.totalCorrect = 0;
+    }
     showApp(uname);
   }
 }
@@ -1118,26 +1165,27 @@ function renderAchievements() {
 async function getMetalPrices() {
   const cached = cacheGet('dyn_metals');
   if (cached) return cached;
-  // Try multiple free metal price sources
+  // Multiple free metal price APIs tried in order
   const METAL_APIS = [
-    // metals.live
+    // 1. metals.live (USD spot)
     async () => {
       const res = await fetch('https://api.metals.live/v1/spot', { signal: AbortSignal.timeout(6000) });
       const arr = await res.json();
       const d = {};
       arr.forEach(item => Object.assign(d, item));
-      if (!d.gold || d.gold < 1000) throw new Error('Implausible gold price');
+      if (!d.gold || d.gold < 1500) throw new Error('Implausible: ' + d.gold);
       return d;
     },
-    // metalpriceapi.com open endpoint (no key needed for spot)
+    // 2. metals-api free tier via allorigins proxy
     async () => {
-      const res = await fetch('https://www.goldapi.io/api/XAU/USD', {
-        headers: { 'x-access-token': 'goldapi-demo' },
-        signal: AbortSignal.timeout(6000)
-      });
+      const url = 'https://metals-api.com/api/latest?access_key=free&base=USD&symbols=XAU,XAG,XPT,XPD';
+      const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(7000) });
       const j = await res.json();
-      if (!j.price || j.price < 1000) throw new Error('Bad gold response');
-      return { gold: j.price, silver: j.silver || 32, platinum: j.platinum || 990, palladium: j.palladium || 1000 };
+      const rates = JSON.parse(j.contents).rates;
+      // metals-api returns oz in terms of 1 unit base — XAU rate = USD per oz (inverted)
+      const gold = rates.XAU ? 1 / rates.XAU : null;
+      if (!gold || gold < 1500) throw new Error('Bad metals-api data');
+      return { gold, silver: rates.XAG ? 1/rates.XAG : 32, platinum: rates.XPT ? 1/rates.XPT : 990, palladium: rates.XPD ? 1/rates.XPD : 1000 };
     },
   ];
   for (const fn of METAL_APIS) {
@@ -1147,9 +1195,8 @@ async function getMetalPrices() {
       return data;
     } catch (e) { console.warn('[WIQ] metals API attempt failed:', e.message); }
   }
-  // All APIs failed — use stale cache or realistic hardcoded fallback
-  const stale = (() => { try { const r = localStorage.getItem('dyn_metals'); if (r) { const o = JSON.parse(r); return o.data; } } catch {} return null; })();
-  return stale || { gold: 2900, silver: 32.0, palladium: 1000, platinum: 990 };
+  const stale = (() => { try { const r = localStorage.getItem('dyn_metals'); if (r) { const o = JSON.parse(r); if (o.data?.gold > 1500) return o.data; } } catch {} return null; })();
+  return stale || { gold: 2940, silver: 33.0, palladium: 1010, platinum: 995 };
 }
 // [FIX v2.1 - FIX 2] USD→INR with multi-endpoint fallback chain
 // Tries: Frankfurter → exchangerate.host → Open Exchange Rates (free) → stale cache → hardcoded
@@ -1209,10 +1256,10 @@ async function getIndianMetalPrices() {
   // Conversion formulas:
   // Gold: (price_per_troy_oz × usdInr) / 31.1035 × 10  → price per 10 grams
   // Silver: price_per_troy_oz × usdInr × 32.1507        → price per kg (1 troy oz = 0.0311035 kg; 1kg = 32.1507 troy oz)
-  // India gold pricing: spot USD/oz × INR rate / 31.1035g × 10g × India tax factor
-  // Import duty (Oct 2024 revised): 12.5% + AgriCess 5% on duty + GST 3% = ~15.7% effective
-  // Using 1.157 multiplier to match MCX real prices
-  const INDIA_TAX   = 1.157;
+  // India gold pricing: spot USD/oz × INR rate / 31.1035g × India tax factor
+  // Import duty 12.5% + AgriCess 5% on duty (= 13.125%) + GST 3% + misc ~0.5% = ~16.5% effective
+  // Empirically calibrated to match live MCX prices: 1.165 works well at current prices
+  const INDIA_TAX   = 1.165;
   const goldPerGram  = Math.round(goldUsd   * usdInr / 31.1035 * INDIA_TAX);
   const goldPer10g   = goldPerGram * 10;
   // Silver: lower import duty (10%) + GST 3% = 1.13 effective
@@ -2267,29 +2314,46 @@ function checkDragAnswers() {
 function addXP(amount) {
   S.xp += amount;
   S.arenaXP += amount;
-  const newLevel = Math.floor(S.xp / XP_PER_LEVEL) + 1;
+  const newLevel = getLevelFromXP(S.xp);
   if (newLevel > S.level) {
     S.level = newLevel;
-    showLevelUp(`You reached Level ${S.level}!`);
-    // Diamond IQ achievement at level 10
+    showLevelUp(`⬆️ Level Up! You reached Level ${S.level} — ${getLevelTitle(S.level)}`);
     if (S.level >= 10) unlockAchievement('diamond_iq');
   }
   updateXPBar();
   saveState();
   const xpDisp = document.getElementById('arena-xp-display');
-  if (xpDisp) xpDisp.textContent = `+${S.arenaXP} XP today`;
+  if (xpDisp) xpDisp.textContent = `+${S.arenaXP} XP this session`;
 }
 
 function updateXPBar() {
-  const pct = ((S.xp % XP_PER_LEVEL) / XP_PER_LEVEL) * 100;
-  const fill = document.getElementById('xp-fill');
-  const val = document.getElementById('xp-val');
-  const lv = document.getElementById('lv-num');
-  const str = document.getElementById('str-num');
+  const lv    = getLevelFromXP(S.xp);
+  S.level     = lv;
+  const withinLv = xpWithinLevel(S.xp);
+  const neededLv = xpForCurrentLevel(S.xp);
+  const pct   = Math.min(100, Math.round(withinLv / neededLv * 100));
+  const fill  = document.getElementById('xp-fill');
+  const val   = document.getElementById('xp-val');
+  const lvEl  = document.getElementById('lv-num');
+  const str   = document.getElementById('str-num');
+  const xpLbl = document.getElementById('xp-label');
   if (fill) fill.style.width = pct + '%';
-  if (val) val.textContent = S.xp;
-  if (lv) lv.textContent = S.level;
-  if (str) str.textContent = S.streak;
+  if (val)  val.textContent  = S.xp;
+  if (lvEl) lvEl.textContent = lv;
+  const lvInline = document.getElementById('lv-inline');
+  if (lvInline) lvInline.textContent = lv;
+  if (str)  str.textContent  = S.streak;
+  // Update XP bar tooltip to show progress within level
+  const xpWrap = document.querySelector('.xp-wrap');
+  if (xpWrap) xpWrap.title = `${withinLv}/${neededLv} XP — Level ${lv}: ${getLevelTitle(lv)}`;
+  const lvIcon = document.getElementById('lv-icon');
+  if (lvIcon) {
+    const icons = ['🌱','🌱','📰','📰','📊','📊','🌍','🌍','🧠','🧠','💎','💎','🏆'];
+    lvIcon.textContent = icons[Math.min(lv, icons.length-1)];
+  }
+  // Update XP bar tooltip
+  const xpValEl = document.getElementById('xp-val');
+  if (xpValEl) xpValEl.title = `Total: ${S.xp} XP | Level ${lv}: ${within}/${neededLv} XP`;
 }
 
 let _toastTimer = null;
@@ -2302,11 +2366,49 @@ function showLevelUp(msg) {
 }
 
 function showLvlModal() {
-  const needed = XP_PER_LEVEL - (S.xp % XP_PER_LEVEL);
+  const lv     = getLevelFromXP(S.xp);
+  const within = xpWithinLevel(S.xp);
+  const needed = xpForCurrentLevel(S.xp);
+  const toNext = needed - within;
+  const title  = getLevelTitle(lv);
+  // Build level ladder display
+  const levels = [1,2,3,4,5,6,7,8,9,10,15,20];
+  const ladder = levels.map(n => {
+    const threshold = xpToReachLevel(n);
+    const req = xpNeededForLevel(n);
+    const done = S.xp >= threshold + req;
+    const current = n === lv;
+    const locked = S.xp < threshold;
+    const icon = done ? '✅' : current ? '▶️' : locked ? '🔒' : '⬜';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);opacity:${locked?0.4:1}">
+      <span style="font-size:16px">${icon}</span>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700;color:${current?'var(--xp2)':'var(--text)'}">Level ${n} — ${getLevelTitle(n)}</div>
+        <div style="font-size:11px;color:var(--muted)">Starts at ${threshold.toLocaleString('en-IN')} XP · Level needs ${req.toLocaleString('en-IN')} XP</div>
+      </div>
+      ${current ? `<span style="font-family:var(--ffm);font-size:10px;color:var(--xp2);padding:2px 8px;border:1px solid rgba(168,85,247,0.3);border-radius:6px">YOU ARE HERE</span>` : ''}
+    </div>`;
+  }).join('');
   openLesson('⚡', 'Your Progress',
-    `<h3>Current Status</h3><strong>Level ${S.level}</strong> · ${S.xp} total XP<br>Need <strong>${needed} more XP</strong> to reach Level ${S.level+1}.
-    <h3>How to Earn XP</h3>• Correct quiz answer: +40–70 XP (new high score only)<br>• First card completion: +20 XP<br>• Daily quest completion: +150 XP<br>• Streak continues each day you login
-    <h3>Levels & Titles</h3>• Level 1–3: Curious Beginner 🌱<br>• Level 4–7: Informed Citizen 📰<br>• Level 8–12: Market Aware 📊<br>• Level 13–20: World Analyst 🌍<br>• Level 21+: Intelligence Master 🧠`);
+    `<h3>Current Status</h3>
+    <div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-family:var(--ffh);font-size:24px;font-weight:700;color:var(--xp2)">Level ${lv}</div>
+      <div style="font-size:13px;color:var(--muted);margin:4px 0 10px">${title}</div>
+      <div style="font-size:13px"><strong style="color:var(--text)">${S.xp.toLocaleString('en-IN')}</strong> total XP · <strong style="color:var(--gold)">${toNext}</strong> more XP to Level ${lv+1}</div>
+      <div style="margin-top:10px;height:6px;background:var(--dim);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${Math.round(within/needed*100)}%;background:linear-gradient(90deg,var(--xp),var(--xp2));border-radius:3px;transition:width 0.5s"></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:4px">${within}/${needed} XP within this level</div>
+    </div>
+    <h3>How to Earn XP</h3>
+    <div style="font-size:13px;color:#7080a0;line-height:1.8">
+      • Quiz high score improvement: XP equal to score gain<br>
+      • First time viewing any card: +20 XP<br>
+      • Completing a Trainee module: +25–40 XP<br>
+      • Daily Quest (visit 2 arenas): +150 XP<br>
+      • Match & Connect perfect score: +200 XP
+    </div>
+    <h3>Level Ladder</h3>${ladder}`);
 }
 function showStreakInfo() {
   openLesson('🔥', `${S.streak} Day Streak!`,
