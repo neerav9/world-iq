@@ -587,7 +587,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
   </div>
 
   <div class="arena-content">
-    <div class="ipanel active" id="ip0"><div id="live-content"></div></div>
+    <div class="ipanel active" id="ip0">
+      <!-- Gold & Silver Live Price UI Block -->
+      <div class="price-row">
+        <div class="price-card gold-c">
+          <div class="pc-tag">GOLD 24K · INDIA</div>
+          <div class="pc-price" id="goldPrice">Loading...</div>
+          <div class="pc-sub">Per 10 grams</div>
+        </div>
+        <div class="price-card silver-c">
+          <div class="pc-tag">SILVER · INDIA</div>
+          <div class="pc-price" id="silverPrice">Loading...</div>
+          <div class="pc-sub">Per kilogram</div>
+        </div>
+      </div>
+      <div id="live-content"></div>
+    </div>
     <div class="ipanel" id="ip1"><div id="why-content"></div></div>
     <div class="ipanel" id="ip2"><div id="forecast-content"></div></div>
     <div class="ipanel" id="ip3"><div id="game-content"></div></div>
@@ -598,6 +613,55 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+// Gold/Silver market price loader (Supabase-only, no scraping, no direct API calls)
+async function loadMarketPrices() {
+  try {
+    const { data, error } = await window.supabaseClient
+      .from("market_prices")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .single();
+    if (error) {
+      console.error("Market fetch error:", error);
+      return;
+    }
+    if (data) {
+      document.getElementById("goldPrice").innerText =
+        "₹" + Math.round(data.gold_inr_10g).toLocaleString("en-IN");
+      document.getElementById("silverPrice").innerText =
+        "₹" + Math.round(data.silver_inr_kg).toLocaleString("en-IN");
+    }
+  } catch (err) {
+    console.error("Market fetch error:", err);
+  }
+}
+
+// Call loadMarketPrices when Gold & Silver arena loads
+function openArena(id) {
+  S.currentArena = id;
+  S.arenaXP = 0;
+  const a = ARENAS[id];
+  document.getElementById('homescreen').style.display = 'none';
+  document.getElementById('arenascreen').style.display = 'block';
+  document.getElementById('arena-top-name').textContent = a.name;
+  document.getElementById('arena-top-sub').textContent = a.sub;
+  document.getElementById('arena-xp-display').textContent = '+0 XP today';
+  switchInner(0);
+  // Visit tracking (daily quest)
+  if (!S.visitedArenas.has(id)) {
+    S.visitedArenas.add(id);
+    const visited = Array.from(S.visitedArenas);
+    localStorage.setItem('wiq_visited_today', JSON.stringify(visited));
+    addXP(20);
+    updateQuest();
+    // Arena explorer achievement
+    if (S.visitedArenas.size >= 6) unlockAchievement('arena_explorer');
+  }
+  window.scrollTo(0, 0);
+  // Only load market prices for Gold & Silver arena
+  if (id === 'gold') loadMarketPrices();
+}
 // ═══════════════════════════════════════════════════════════
 // WORLD IQ — UPGRADED ARCHITECTURE v2.0
 // ═══════════════════════════════════════════════════════════
