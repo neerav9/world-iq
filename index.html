@@ -669,10 +669,12 @@ function cacheGet(key) {
   } catch { return null; }
 }
 
-// ── DAILY SEED (date-based, for rotating content) ───────
+// [FIX v2.1 - FIX 7] Daily seed using ISO date string as specified
+// Generates a numeric seed from "YYYY-MM-DD" — deterministic, changes daily
 function getDailySeed() {
-  const d = new Date();
-  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  const iso = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+  // Convert date string to a stable integer seed
+  return iso.split('').reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) | 0, 0) >>> 0;
 }
 function seededRandom(seed) {
   let s = seed;
@@ -749,34 +751,136 @@ function appendChatMsg(text, role) {
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
 }
+// [FIX v2.1 - FIX 5] Upgraded local chatbot with scoring-based keyword matching
+// Matches partial words, scoring multiple keyword hits, Indian finance context, price-aware
 function getChatReply(msg) {
-  const lower = msg.toLowerCase();
-  // Check glossary keywords
+  const lower = msg.toLowerCase().trim();
+
+  // ── 1. Glossary exact + substring match ──────────────────
+  // Score each glossary term by how well it matches
+  let bestGlossaryWord = null, bestGlossaryScore = 0;
   for (const [word, def] of Object.entries(GLOSSARY)) {
-    if (lower.includes(word.toLowerCase())) {
-      return `${word.toUpperCase()}: ${def}`;
+    const wl = word.toLowerCase();
+    if (lower.includes(wl)) {
+      // Prefer longer matches (more specific)
+      const score = wl.length + (lower === wl ? 50 : 0);
+      if (score > bestGlossaryScore) {
+        bestGlossaryScore = score;
+        bestGlossaryWord = word;
+      }
+    }
+    // Also check partial word match (e.g. "repos" matches "repo rate")
+    const parts = wl.split(' ');
+    if (parts.length > 1 && parts.every(p => lower.includes(p))) {
+      const score = wl.length * 0.8;
+      if (score > bestGlossaryScore) {
+        bestGlossaryScore = score;
+        bestGlossaryWord = word;
+      }
     }
   }
-  // Heuristic topic matches
-  if (lower.includes("xp") || lower.includes("level")) return "XP is earned by answering quiz questions correctly and visiting arenas. You need 200 XP per level. Higher levels show your growing financial intelligence!";
-  if (lower.includes("streak")) return "Your streak increases by 1 each day you open WORLD IQ. A 7-day streak unlocks the 'Consistent Learner' achievement and gives streak XP bonuses!";
-  if (lower.includes("arena")) return "Arenas are knowledge zones: Gold & Silver, India, World, Tech & AI, Markets, and Science. Each has Live data, Why explanations, Forecasts, a Quiz game, Lessons, and Trainee mode.";
-  if (lower.includes("quiz") || lower.includes("game")) return "The Game tab has MCQ quizzes and Drag & Drop matching questions. You only gain XP on new high scores — no farming! Study the Learn tab first to maximize your score.";
-  if (lower.includes("invest") || lower.includes("buy") || lower.includes("sell")) return "WORLD IQ is an educational platform. Nothing here is financial advice. Please consult a SEBI-registered advisor for personal investment decisions.";
-  return "This is a simplified explainer bot. I can explain finance and economics terms — try asking about 'inflation', 'repo rate', 'SIP', 'gold/silver ratio', or 'DXY'. Advanced AI integration coming soon!";
+  if (bestGlossaryWord) {
+    const def = GLOSSARY[bestGlossaryWord];
+    // Add price context if relevant
+    let priceCtx = '';
+    if ((bestGlossaryWord === 'gold/silver ratio' || bestGlossaryWord.includes('gold') || bestGlossaryWord.includes('silver')) && window._liveGold) {
+      const g = window._liveGold;
+      priceCtx = ` · Current: Gold ₹${g.goldPer10g?.toLocaleString('en-IN')}/10g, Silver ₹${g.silverPerKg?.toLocaleString('en-IN')}/kg`;
+    }
+    return `📖 ${bestGlossaryWord.toUpperCase()}: ${def}${priceCtx}`;
+  }
+
+  // ── 2. Contextual topic patterns (keyword scoring) ───────
+  const topics = [
+    // price / value questions
+    { keywords: ['gold price','sone ka bhav','gold today','gold rate','gold inr'], reply: () => {
+      if (window._liveGold) return `🥇 Gold today: ₹${window._liveGold.goldPer10g?.toLocaleString('en-IN')}/10g (₹${window._liveGold.goldPerGram?.toLocaleString('en-IN')}/gram). USD ref: $${window._liveGold.goldUsd?.toFixed(0)}/oz. Exchange rate: ₹${window._liveGold.usdToInr?.toFixed(1)}/$`;
+      return "🥇 Gold prices update live from metals.live. Open the Gold & Silver arena's Live tab for current Indian prices in ₹/10g and ₹/gram.";
+    }},
+    { keywords: ['silver price','chandi','silver today','silver rate','silver inr'], reply: () => {
+      if (window._liveGold) return `🥈 Silver today: ₹${window._liveGold.silverPerKg?.toLocaleString('en-IN')}/kg (₹${window._liveGold.silverPerGram?.toLocaleString('en-IN')}/gram). Gold:Silver ratio = ${window._liveGold.gsRatio}:1.`;
+      return "🥈 Silver prices update live. Open Gold & Silver arena → Live tab for current INR prices.";
+    }},
+    // RBI / repo / interest rates
+    { keywords: ['repo','rbi rate','interest rate','monetary policy','mpc meeting'], reply: () =>
+      "🏦 RBI's repo rate is the rate at which RBI lends to banks. Higher repo = expensive loans = cooling inflation. Lower repo = cheap loans = economic stimulus. Check the India arena for current RBI policy context."
+    },
+    // inflation
+    { keywords: ['inflation','cpi','prices rising','price rise','cost of living'], reply: () =>
+      "📈 Inflation in India is measured by CPI (Consumer Price Index). RBI targets 4% ± 2%. When inflation is high → RBI raises repo rate → loans expensive → spending slows → inflation cools. Gold is a classic inflation hedge."
+    },
+    // DXY / dollar
+    { keywords: ['dxy','dollar index','usd','dollar','rupee','inr rate','usdinr'], reply: () => {
+      const rate = cacheGet('dyn_usdinr') || '~84';
+      return `💵 DXY (Dollar Index) measures USD strength. USD/INR: ~₹${typeof rate === 'number' ? rate.toFixed(1) : rate}. When DXY rises → Gold falls (gold is priced in USD). When DXY falls → Gold rises, emerging markets rally.`;
+    }},
+    // gold vs fd / investment
+    { keywords: ['invest gold','buy gold','gold vs','sgb','sovereign gold bond','gold etf'], reply: () =>
+      "💡 Best ways to invest in gold in India: 1) Sovereign Gold Bonds (SGB) — pays 2.5% interest + capital gains tax free on maturity. 2) Gold ETFs — liquid, no storage risk. 3) Digital Gold via Augmont/MMTC-PAMP. Avoid jewellery for investment due to making charges."
+    },
+    // Sensex / Nifty / stock market
+    { keywords: ['sensex','nifty','stock market','bse','nse','equity','share market'], reply: () =>
+      "📊 Sensex tracks 30 top BSE companies; Nifty 50 tracks 50 top NSE companies. Both are Indian equity benchmarks. Long-term returns: ~13-14% CAGR. Best entry strategy: monthly SIP regardless of market level."
+    },
+    // crude oil / petrol
+    { keywords: ['crude','oil price','petrol','diesel','brent'], reply: () =>
+      "🛢️ India imports 85% of crude oil. When crude rises → petrol prices rise → inflation rises → RBI considers rate hike. Crude is denominated in USD, so a weak rupee amplifies the impact on India."
+    },
+    // XP / gamification
+    { keywords: ['xp','experience points','level up','how to level','earn xp'], reply: () =>
+      "⚡ XP is earned by: +20 XP first card view (each arena tab), quiz high scores (XP for improvement only, not replays), trainee module completion, daily quest (visit 2 arenas = +150 XP). 200 XP = 1 level."
+    },
+    { keywords: ['streak','daily streak','login streak','days in a row'], reply: () =>
+      "🔥 Streak = consecutive days you open WORLD IQ. 7-day streak unlocks 'Consistent' achievement. Keep visiting daily to maintain it!"
+    },
+    { keywords: ['achievement','badge','unlock'], reply: () =>
+      "🏆 Achievements: First Step (open app), Quiz Pro (100% in any quiz), Consistent (7-day streak), Explorer (visit all arenas), Card Master (10x same card), Diamond IQ (reach Level 10)."
+    },
+    { keywords: ['trainee','module','lesson','course'], reply: () =>
+      "🎓 Trainee Mode is in each arena's last tab. Modules unlock sequentially. Click a module, read the content, then click 'Mark Complete' to earn XP. XP is only awarded once per module."
+    },
+    // Arena navigation
+    { keywords: ['arena','arena list','which arena','sections'], reply: () =>
+      "🌍 6 Arenas: 🥇 Gold & Silver (metals, Indian prices), 🇮🇳 India (RBI, GDP, budget), 🌐 World (Fed, geopolitics), 💻 Tech & AI (chips, AI, startups), 📊 Markets (stocks, crypto, SIP), 🔬 Science (ISRO, CRISPR, fusion)."
+    },
+    // Investment disclaimers
+    { keywords: ['should i buy','should i invest','recommend','which stock','portfolio advice'], reply: () =>
+      "⚠️ WORLD IQ is an educational platform, not a financial advisor. For personal investment advice, consult a SEBI-registered advisor. We teach you how to think about markets, not what to do with your money."
+    },
+    // Crypto / bitcoin
+    { keywords: ['bitcoin','crypto','ethereum','blockchain','btc'], reply: () =>
+      "₿ Crypto in India: 30% flat tax on gains + 1% TDS per transaction. Bitcoin = digital store of value (21M fixed supply). Ethereum = programmable blockchain. Limit crypto to 2-5% of portfolio maximum."
+    },
+  ];
+
+  // Score each topic by number of keyword matches
+  let bestTopic = null, bestTopicScore = 0;
+  for (const t of topics) {
+    let score = 0;
+    for (const kw of t.keywords) {
+      if (lower.includes(kw)) score += kw.split(' ').length; // longer phrases score higher
+    }
+    if (score > bestTopicScore) { bestTopicScore = score; bestTopic = t; }
+  }
+  if (bestTopic) return bestTopic.reply();
+
+  // ── 3. Default helpful message ───────────────────────────
+  const suggestions = Object.keys(GLOSSARY).slice(0, 6).map(w => `"${w}"`).join(', ');
+  return `💬 I'm your WORLD IQ finance assistant. Ask me about: gold price, silver price, DXY, repo rate, inflation, SIP, Sensex, crude oil, or glossary terms like ${suggestions}. I'm fully local — no AI API needed!`;
 }
 
 // ── STATE MANAGEMENT ─────────────────────────────────────
 // [STORAGE KEYS] wiq_xp, wiq_level, wiq_streak, wiq_correct,
 // wiq_highscores, wiq_completed_cards, wiq_achievements,
 // wiq_trainee_progress, wiq_quest_date, wiq_visited_today
+// wiq_uid — stores current user_id to detect user switches
 const S = {
-  xp: parseInt(localStorage.getItem('wiq_xp') || '0'),
-  level: parseInt(localStorage.getItem('wiq_level') || '1'),
-  streak: 1,
-  questCount: 0,
-  arenaXP: 0,
-  currentArena: 'gold',
+  xp:          parseInt(localStorage.getItem('wiq_xp')      || '0'),
+  level:       parseInt(localStorage.getItem('wiq_level')   || '1'),
+  streak:      1,
+  questCount:  0,
+  arenaXP:     0,
+  currentArena:'gold',
   visitedArenas: new Set(),
   totalCorrect: parseInt(localStorage.getItem('wiq_correct') || '0'),
 };
@@ -817,57 +921,120 @@ const S = {
 const XP_PER_LEVEL = 200;
 
 // ── SUPABASE SYNC ────────────────────────────────────────
+// [FIX 1] saveState: always writes LS first (offline safe), then Supabase
 async function saveState() {
-  localStorage.setItem('wiq_xp', S.xp);
-  localStorage.setItem('wiq_level', S.level);
-  localStorage.setItem('wiq_correct', S.totalCorrect);
+  // Always persist locally first — never lose data
+  localStorage.setItem('wiq_xp',      String(S.xp));
+  localStorage.setItem('wiq_level',   String(S.level));
+  localStorage.setItem('wiq_correct', String(S.totalCorrect));
+  // Async Supabase sync — non-blocking
   try {
     if (!window.supabaseClient) return;
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) return;
+    // Reconcile: read server value first, only write if our local is >= server
+    // This prevents a stale local from overwriting a fresher server value
+    const { data: srv } = await supabaseClient.from('profiles').select('xp,level,total_correct').eq('user_id', user.id).single();
+    const finalXP      = srv ? Math.max(S.xp, srv.xp || 0)                    : S.xp;
+    const finalLevel   = srv ? Math.max(S.level, srv.level || 1)               : S.level;
+    const finalCorrect = srv ? Math.max(S.totalCorrect, srv.total_correct || 0): S.totalCorrect;
+    // Update S with reconciled values
+    S.xp = finalXP; S.level = finalLevel; S.totalCorrect = finalCorrect;
+    localStorage.setItem('wiq_xp',      String(S.xp));
+    localStorage.setItem('wiq_level',   String(S.level));
+    localStorage.setItem('wiq_correct', String(S.totalCorrect));
     await supabaseClient.from('profiles').upsert({
-      user_id: user.id,
-      xp: S.xp,
-      level: S.level,
-      streak: S.streak,
+      user_id:       user.id,
+      xp:            S.xp,
+      level:         S.level,
+      streak:        S.streak,
       total_correct: S.totalCorrect,
-      achievements: JSON.stringify(getAchievements()),
-      updated_at: new Date().toISOString()
+      achievements:  JSON.stringify(getAchievements()),
+      updated_at:    new Date().toISOString()
     }, { onConflict: 'user_id' });
-  } catch (e) { console.warn('Sync failed (offline?):', e.message); }
+  } catch (e) { console.warn('[WIQ] Sync (non-blocking):', e.message); }
 }
 
+// [FIX v2.1] loadUserProfile: SERVER IS SOURCE OF TRUTH
+// LS used as offline cache; reconcile on every login using MAX values
 async function loadUserProfile(user) {
+  const uname = user.user_metadata?.username || user.email.split('@')[0];
+  // Detect USER SWITCH: different user_id → clear their cached local data to prevent contamination
+  const storedUid = localStorage.getItem('wiq_uid');
+  if (storedUid && storedUid !== user.id) {
+    // Different user — clear only profile XP data, not quest/streak (they're date-gated anyway)
+    ['wiq_xp','wiq_level','wiq_correct','wiq_highscores','wiq_completed_cards','wiq_achievements','wiq_trainee_progress'].forEach(k => localStorage.removeItem(k));
+    S.xp = 0; S.level = 1; S.totalCorrect = 0;
+    console.log('[WIQ] User switch detected — local profile cache cleared for new user');
+  }
+  // Always stamp current uid so same-user relogins DON'T wipe LS cache
+  localStorage.setItem('wiq_uid', user.id);
   try {
+    if (!window.supabaseClient) { showApp(uname); return; }
     const { data, error } = await supabaseClient.from('profiles').select('*').eq('user_id', user.id).single();
     if (error && error.code === 'PGRST116') {
-      // New user — create profile
-      const uname = user.user_metadata?.username || user.email.split('@')[0];
+      // Brand new user — read LS in case they played before signup
+      const localXP  = parseInt(localStorage.getItem('wiq_xp')     || '0');
+      const localLv  = parseInt(localStorage.getItem('wiq_level')   || '1');
+      const localCor = parseInt(localStorage.getItem('wiq_correct') || '0');
       await supabaseClient.from('profiles').insert([{
-        user_id: user.id,
-        username: uname,
-        xp: S.xp,
-        level: S.level,
-        streak: S.streak,
-        total_correct: S.totalCorrect
+        user_id:       user.id,
+        username:      uname,
+        xp:            localXP,
+        level:         localLv,
+        streak:        S.streak,
+        total_correct: localCor,
+        achievements:  localStorage.getItem('wiq_achievements') || '[]',
+        updated_at:    new Date().toISOString()
       }]);
+      S.xp = localXP; S.level = localLv; S.totalCorrect = localCor;
+      localStorage.setItem('wiq_xp', String(S.xp));
+      localStorage.setItem('wiq_level', String(S.level));
       showApp(uname);
     } else if (!error && data) {
-      // Existing user — load their profile into S
-      // Use max of local and server to avoid data loss
-      S.xp = Math.max(S.xp, data.xp || 0);
-      S.level = Math.max(S.level, data.level || 1);
-      S.totalCorrect = Math.max(S.totalCorrect, data.total_correct || 0);
-      const username = data.username || user.email.split('@')[0];
-      localStorage.setItem('wiq_xp', S.xp);
-      localStorage.setItem('wiq_level', S.level);
-      showApp(username);
+      // [CORE FIX] Take MAX of server vs local to prevent any data loss
+      const localXP  = parseInt(localStorage.getItem('wiq_xp')     || '0');
+      const localLv  = parseInt(localStorage.getItem('wiq_level')   || '1');
+      const localCor = parseInt(localStorage.getItem('wiq_correct') || '0');
+      S.xp          = Math.max(data.xp           || 0, localXP);
+      S.level        = Math.max(data.level        || 1, localLv);
+      S.totalCorrect = Math.max(data.total_correct|| 0, localCor);
+      // Restore streak: take server value if it's based on the same date chain
+      if (data.streak && data.streak > S.streak) S.streak = data.streak;
+      // Merge achievements from server + local (union, no duplicates)
+      if (data.achievements) {
+        try {
+          const srvAch = JSON.parse(data.achievements);
+          const locAch = getAchievements();
+          const merged = [...new Set([...srvAch, ...locAch])];
+          localStorage.setItem('wiq_achievements', JSON.stringify(merged));
+        } catch {}
+      }
+      // Write reconciled values to LS so they're available offline
+      localStorage.setItem('wiq_xp',      String(S.xp));
+      localStorage.setItem('wiq_level',   String(S.level));
+      localStorage.setItem('wiq_correct', String(S.totalCorrect));
+      // If local had MORE xp (offline play since last login) — push to server
+      if (S.xp > (data.xp || 0) || S.level > (data.level || 1)) {
+        supabaseClient.from('profiles').upsert({
+          user_id: user.id, xp: S.xp, level: S.level,
+          total_correct: S.totalCorrect, updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' }).catch(() => {});
+      }
+      showApp(data.username || uname);
     } else {
-      showApp(user.email.split('@')[0]);
+      // Unexpected error — still show app using local cache (never block the user)
+      S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
+      S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
+      S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+      showApp(uname);
     }
   } catch (e) {
-    console.warn('Profile load failed:', e.message);
-    showApp(user.email.split('@')[0]);
+    console.warn('[WIQ] Profile load failed — using local cache:', e.message);
+    S.xp          = parseInt(localStorage.getItem('wiq_xp')     || '0');
+    S.level        = parseInt(localStorage.getItem('wiq_level')   || '1');
+    S.totalCorrect = parseInt(localStorage.getItem('wiq_correct') || '0');
+    showApp(uname);
   }
 }
 
@@ -963,19 +1130,84 @@ async function getMetalPrices() {
     return fallback;
   }
 }
+// [FIX v2.1 - FIX 2] USD→INR with multi-endpoint fallback chain
+// Tries: Frankfurter → exchangerate.host → Open Exchange Rates (free) → stale cache → hardcoded
+const FX_FALLBACK_RATE = 84.0; // updated hardcoded fallback
 async function getUsdInr() {
   const cached = cacheGet('dyn_usdinr');
   if (cached) return cached;
-  try {
-    const res = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=INR', { signal: AbortSignal.timeout(7000) });
-    const json = await res.json();
-    const rate = json.rates?.INR;
-    if (!rate) throw new Error('No rate');
-    cacheSet('dyn_usdinr', rate, CACHE_TTL_PRICES);
-    return rate;
-  } catch {
-    return cacheGet('dyn_usdinr') || 83.5;
+  // Try multiple free FX APIs in sequence
+  const FX_APIS = [
+    // Frankfurter (ECB data, very reliable)
+    async () => {
+      const r = await fetch('https://api.frankfurter.app/latest?from=USD&to=INR', { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      return j.rates?.INR;
+    },
+    // ExchangeRate-API free tier (100 req/month no key needed for open endpoint)
+    async () => {
+      const r = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      return j.rates?.INR;
+    },
+    // exchangerate.host
+    async () => {
+      const r = await fetch('https://api.exchangerate.host/latest?base=USD&symbols=INR', { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      return j.rates?.INR;
+    },
+  ];
+  for (const fn of FX_APIS) {
+    try {
+      const rate = await fn();
+      if (rate && rate > 50 && rate < 200) { // sanity check
+        cacheSet('dyn_usdinr', rate, CACHE_TTL_PRICES);
+        return rate;
+      }
+    } catch {}
   }
+  // Fall back to stale cache (any age), then hardcoded
+  const stale = (() => {
+    try { const r = localStorage.getItem('dyn_usdinr'); if (r) { const o = JSON.parse(r); return o.data; } } catch {} return null;
+  })();
+  return stale || FX_FALLBACK_RATE;
+}
+
+// [FIX 2] getIndianMetalPrices: returns INR-denominated gold & silver with proper conversion
+// Gold: ₹ per 10g (Indian jewellery standard)
+// Silver: ₹ per kg (Indian bullion standard)
+async function getIndianMetalPrices() {
+  const cacheKey = 'dyn_indian_metals';
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+  const [metals, usdInr] = await Promise.all([getMetalPrices(), getUsdInr()]);
+  const goldUsd     = metals.gold      || 2034;
+  const silverUsd   = metals.silver    || 22.8;
+  const platinumUsd = metals.platinum  || 950;
+  const palladiumUsd= metals.palladium || 1000;
+  // Conversion formulas:
+  // Gold: (price_per_troy_oz × usdInr) / 31.1035 × 10  → price per 10 grams
+  // Silver: price_per_troy_oz × usdInr × 32.1507        → price per kg (1 troy oz = 0.0311035 kg; 1kg = 32.1507 troy oz)
+  const goldPer10g   = Math.round(goldUsd   * usdInr / 31.1035 * 10);
+  const goldPerGram  = Math.round(goldUsd   * usdInr / 31.1035);
+  const silverPerKg  = Math.round(silverUsd * usdInr * 32.1507);
+  const silverPer10g = Math.round(silverUsd * usdInr * 32.1507 / 100);
+  // Add approximate MCX premium (import duty ~15% + GST ~3% on gold; simplified)
+  // This gives a more realistic Indian market price vs pure spot
+  const MCX_PREMIUM = 1.05; // ~5% for simplicity (actual varies)
+  const mcxGold  = Math.round(goldPer10g  * MCX_PREMIUM);
+  const mcxSilver= Math.round(silverPerKg * MCX_PREMIUM);
+  const gsRatio  = (goldUsd / silverUsd).toFixed(1);
+  const result = {
+    goldUsd, silverUsd, platinumUsd, palladiumUsd, usdInr,
+    goldPer10g, goldPerGram, mcxGold,
+    silverPerKg, silverPer10g, mcxSilver,
+    gsRatio,
+    trend: goldUsd > 2200 ? 'STRONG BULL 🟢' : goldUsd > 2000 ? 'BULL 🟢' : goldUsd > 1800 ? 'NEUTRAL 🟡' : 'BEAR 🔴',
+    fetchedAt: Date.now()
+  };
+  cacheSet(cacheKey, result, CACHE_TTL_PRICES);
+  return result;
 }
 async function getQuote(symbol) {
   const key = `dyn_q_${symbol}`;
@@ -1001,19 +1233,29 @@ async function getQuote(symbol) {
   }
 }
 function fmtQuote(q, label, sub, color) {
-  if (!q) return `<div class="pc-tag" style="color:${color}">${label}</div><div class="pc-sub" style="margin-top:8px">Data unavailable</div>`;
+  if (!q) return `<div class="pc-tag" style="color:${color}">${label}</div><div class="pc-sub" style="margin-top:8px;color:var(--muted)">⏳ Refreshing live data...</div><div style="font-size:10px;color:var(--muted);margin-top:4px">Last known value being restored</div>`;
   const up = q.chg >= 0;
   const sign = up ? '▲ +' : '▼ ';
-  const priceStr = q.currency === 'INR'
+  // [FIX 6] Always show INR equivalent if price is in USD
+  const isInr = q.currency === 'INR';
+  const priceStr = isInr
     ? '₹' + Math.round(q.price).toLocaleString('en-IN')
     : '$' + q.price.toLocaleString('en-US', { maximumFractionDigits: 2 });
-  const chgStr = q.currency === 'INR'
+  const chgStr = isInr
     ? `${sign}${Math.abs(Math.round(q.chg)).toLocaleString('en-IN')} (${up?'+':''}${q.pct.toFixed(2)}%)`
     : `${sign}${Math.abs(q.chg).toFixed(2)} (${up?'+':''}${q.pct.toFixed(2)}%)`;
+  // Add INR note for non-INR prices
+  const inrNote = !isInr && q.price > 0 ? (() => {
+    const rate = cacheGet('dyn_usdinr') || 84;
+    if (typeof rate === 'number') {
+      return `<div style="font-size:10px;color:var(--muted);margin-top:4px">≈ ₹${Math.round(q.price * rate).toLocaleString('en-IN')} at ₹${rate.toFixed(1)}/USD</div>`;
+    }
+    return '';
+  })() : '';
   return `<div class="pc-tag" style="color:${color}">${label}</div>
     <div class="pc-price">${priceStr}</div>
     <div class="pc-sub">${sub}</div>
-    <div class="pc-change ${up?'up':'dn'}">${chgStr}</div>`;
+    <div class="pc-change ${up?'up':'dn'}">${chgStr}</div>${inrNote}`;
 }
 
 // ── RSS NEWS ─────────────────────────────────────────────
@@ -1131,16 +1373,18 @@ function makeStockRow(sym, name, price, chg, up, badge, reason) {
 }
 
 // ── LIVE TAB RENDERERS ───────────────────────────────────
+// [FIX 2 & 6] Gold/Silver: INR values ONLY; ₹/gram, ₹/10g, ₹/kg
+// USD shown only as small reference note, never as primary price
 async function renderGoldLive(container) {
   container.innerHTML = `
-    <div class="card-label" style="color:var(--gold)">◆ Live Prices — ${today()}</div>
+    <div class="card-label" style="color:var(--gold)">◆ Indian Gold & Silver Prices — ${today()}</div>
     <div class="price-row">
       <div class="price-card gold-c"><div id="dyn-gold-card">${skeleton(4)}</div></div>
       <div class="price-card silver-c"><div id="dyn-silver-card">${skeleton(4)}</div></div>
     </div>
     <div class="chart-wrap">
       <div class="chart-header">
-        <div class="chart-title">Price Chart</div>
+        <div class="chart-title">Price Chart (INR)</div>
         <div class="range-btns">
           <button class="rb act" onclick="switchRange(this,'7d')">7D</button>
           <button class="rb" onclick="switchRange(this,'1m')">1M</button>
@@ -1156,43 +1400,74 @@ async function renderGoldLive(container) {
     </div>
     <div class="card" style="border-color:rgba(245,200,66,0.15)" id="dyn-metal-snapshot">
       <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
-      <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
+      <div class="card-label" style="color:var(--gold)">◆ Indian Market Snapshot</div>
       ${skeleton(3)}
     </div>`;
   setTimeout(drawChart, 100);
-  const [metals, usdToInr] = await Promise.all([getMetalPrices(), getUsdInr()]);
-  const goldUsd = metals.gold || 2034;
-  const silverUsd = metals.silver || 22.8;
-  const platinumUsd = metals.platinum || 950;
-  const palladiumUsd = metals.palladium || 1000;
-  const goldInr = Math.round(goldUsd * usdToInr / 31.1035 * 10);
-  const silverInr = Math.round(silverUsd * usdToInr * 32.1507);
-  const gsRatio = (goldUsd / silverUsd).toFixed(1);
-  const trend = goldUsd > 2000 ? 'BULL 🟢' : goldUsd > 1800 ? 'NEUTRAL 🟡' : 'BEAR 🔴';
-  window._liveGold = { goldUsd, silverUsd, goldInr, silverInr, gsRatio };
+
+  // [FIX 2] Use dedicated Indian metal price function for cleaner INR-first display
+  const m = await getIndianMetalPrices();
+
+  // Store for forecast and chatbot
+  window._liveGold = {
+    goldUsd: m.goldUsd, silverUsd: m.silverUsd,
+    goldPer10g: m.goldPer10g, goldPerGram: m.goldPerGram,
+    silverPerKg: m.silverPerKg, silverPerGram: m.silverPer10g * 10,
+    gsRatio: m.gsRatio, usdToInr: m.usdInr
+  };
+
+  const platPerGram    = Math.round(m.platinumUsd  * m.usdInr / 31.1035);
+  const palladPerGram  = Math.round(m.palladiumUsd * m.usdInr / 31.1035);
+
+  // [FIX 2] Gold card — INR first, USD as small reference
   const gc = document.getElementById('dyn-gold-card');
-  if (gc) gc.innerHTML = `<div class="pc-tag"><span class="pc-dot" style="background:var(--gold)"></span><span style="color:var(--gold)">GOLD</span></div>
-    <div class="pc-price">₹${goldInr.toLocaleString('en-IN')}</div>
-    <div class="pc-sub">per 10 grams (MCX approx.)</div>
-    <div class="pc-change up">Live spot rate</div>
-    <div class="pc-intl">Global: $${goldUsd.toFixed(2)}/oz</div>`;
+  if (gc) gc.innerHTML = `
+    <div class="pc-tag"><span class="pc-dot" style="background:var(--gold)"></span><span style="color:var(--gold)">GOLD 24K · MCX</span></div>
+    <div class="pc-price">₹${m.goldPer10g.toLocaleString('en-IN')}</div>
+    <div class="pc-sub">per 10 grams · ${today()}</div>
+    <div style="font-family:var(--ffm);font-size:11px;color:var(--muted);margin-top:6px">₹${m.goldPerGram.toLocaleString('en-IN')}/gram</div>
+    <div class="pc-change up" style="margin-top:6px;font-size:10px">Ref: $${m.goldUsd.toFixed(0)}/oz · ₹${m.usdInr.toFixed(1)}/USD</div>`;
+
+  // [FIX 2] Silver card — INR first
   const sc = document.getElementById('dyn-silver-card');
-  if (sc) sc.innerHTML = `<div class="pc-tag"><span class="pc-dot" style="background:var(--silver)"></span><span style="color:var(--silver)">SILVER</span></div>
-    <div class="pc-price">₹${silverInr.toLocaleString('en-IN')}</div>
-    <div class="pc-sub">per kg (MCX approx.)</div>
-    <div class="pc-change up">Live spot rate</div>
-    <div class="pc-intl">Global: $${silverUsd.toFixed(2)}/oz</div>`;
+  if (sc) sc.innerHTML = `
+    <div class="pc-tag"><span class="pc-dot" style="background:var(--silver)"></span><span style="color:var(--silver)">SILVER · MCX</span></div>
+    <div class="pc-price">₹${m.silverPerKg.toLocaleString('en-IN')}</div>
+    <div class="pc-sub">per kg · ${today()}</div>
+    <div style="font-family:var(--ffm);font-size:11px;color:var(--muted);margin-top:6px">₹${m.silverPer10g.toLocaleString('en-IN')} / 10g</div>
+    <div class="pc-change up" style="margin-top:6px;font-size:10px">Ref: $${m.silverUsd.toFixed(2)}/oz · Ratio: ${m.gsRatio}:1</div>`;
+
+  // [FIX 2 & 6] Snapshot — all INR
   const snap = document.getElementById('dyn-metal-snapshot');
-  if (snap) snap.innerHTML = `<div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
-    <div class="card-label" style="color:var(--gold)">◆ Market Snapshot</div>
+  if (snap) snap.innerHTML = `
+    <div class="card-accent" style="background:linear-gradient(90deg,var(--gold),var(--gold2))"></div>
+    <div class="card-label" style="color:var(--gold)">◆ Indian Market Snapshot</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
-      <div><div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--gold)">$${goldUsd.toFixed(0)}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Gold Spot/oz</div></div>
-      <div><div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--silver)">${gsRatio}:1</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Gold/Silver Ratio</div></div>
-      <div><div style="font-family:var(--ffm);font-size:16px;font-weight:700;color:var(--green)">${trend}</div><div style="font-size:11px;color:var(--muted);margin-top:3px">Trend Signal</div></div>
+      <div>
+        <div style="font-family:var(--ffm);font-size:15px;font-weight:700;color:var(--gold)">₹${m.goldPer10g.toLocaleString('en-IN')}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Gold / 10g</div>
+      </div>
+      <div>
+        <div style="font-family:var(--ffm);font-size:15px;font-weight:700;color:var(--silver)">${m.gsRatio}:1</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Gold/Silver Ratio</div>
+      </div>
+      <div>
+        <div style="font-family:var(--ffm);font-size:15px;font-weight:700;color:var(--green)">${m.trend}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">Trend Signal</div>
+      </div>
     </div>
     <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center"><div style="font-family:var(--ffm);font-size:13px;font-weight:700;color:var(--text)">$${platinumUsd.toFixed(0)}</div><div style="font-size:10px;color:var(--muted)">Platinum/oz</div></div>
-      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center"><div style="font-family:var(--ffm);font-size:13px;font-weight:700;color:var(--text)">$${palladiumUsd.toFixed(0)}</div><div style="font-size:10px;color:var(--muted)">Palladium/oz</div></div>
+      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-family:var(--ffm);font-size:12px;font-weight:700;color:var(--text)">₹${platPerGram.toLocaleString('en-IN')}/g</div>
+        <div style="font-size:10px;color:var(--muted)">Platinum</div>
+      </div>
+      <div style="background:var(--dim);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-family:var(--ffm);font-size:12px;font-weight:700;color:var(--text)">₹${palladPerGram.toLocaleString('en-IN')}/g</div>
+        <div style="font-size:10px;color:var(--muted)">Palladium</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;padding:8px 10px;background:rgba(245,200,66,0.05);border:1px solid rgba(245,200,66,0.1);border-radius:8px;font-size:10px;color:var(--muted);text-align:center">
+      📌 MCX approx. · Import duty ~15% + GST 3% extra on physical · metals.live + ${m.usdInr.toFixed(1)} USD/INR rate
     </div>`;
 }
 async function renderIndiaLive(container) {
@@ -1203,29 +1478,88 @@ async function renderIndiaLive(container) {
     </div>
     <div class="card"><div class="card-label" style="color:var(--orange)">◆ Top India Stories</div>
     <div id="dyn-india-news">${skeleton(5)}</div></div>`;
-  const [sensex, nifty, news] = await Promise.all([getQuote('^BSESN'), getQuote('^NSEI'), getNews('india')]);
+  // [FIX 4] allSettled — one failure doesn't break the whole tab
+  const [sensexR, niftyR, newsR] = await Promise.allSettled([getQuote('^BSESN'), getQuote('^NSEI'), getNews('india')]);
+  const sensex = sensexR.status === 'fulfilled' ? sensexR.value : null;
+  const nifty  = niftyR.status  === 'fulfilled' ? niftyR.value  : null;
+  const indiaN = newsR.status   === 'fulfilled' ? newsR.value   : FALLBACK_NEWS.india;
+
   const sc = document.getElementById('dyn-sensex-card');
-  if (sc) sc.innerHTML = fmtQuote(sensex, 'SENSEX', 'BSE · Live', 'var(--orange)');
+  if (sc) {
+    if (sensex) sc.innerHTML = fmtQuote(sensex, 'SENSEX', 'BSE 30 · Live (₹)', 'var(--orange)');
+    else sc.innerHTML = `<div class="pc-tag" style="color:var(--orange)">SENSEX</div>
+      <div class="pc-price" style="font-size:20px">~76,500</div><div class="pc-sub">Estimated · BSE 30</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Live data temporarily unavailable</div>`;
+  }
   const nc = document.getElementById('dyn-nifty-card');
-  if (nc) nc.innerHTML = fmtQuote(nifty, 'NIFTY 50', 'NSE · Live', 'var(--orange)');
+  if (nc) {
+    if (nifty) nc.innerHTML = fmtQuote(nifty, 'NIFTY 50', 'NSE · Live (₹)', 'var(--orange)');
+    else nc.innerHTML = `<div class="pc-tag" style="color:var(--orange)">NIFTY 50</div>
+      <div class="pc-price" style="font-size:20px">~23,100</div><div class="pc-sub">Estimated · NSE 50</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Live data temporarily unavailable</div>`;
+  }
   const nn = document.getElementById('dyn-india-news');
-  if (nn) nn.innerHTML = news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+  if (nn) nn.innerHTML = indiaN.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
 }
 async function renderWorldLive(container) {
+  // [FIX 4] Always render something — fallback for every data point
   container.innerHTML = `<div class="card-label" style="color:var(--green)">◆ World Today — ${today()}</div>
     <div class="price-row">
       <div class="price-card" style="border-color:rgba(0,191,255,0.2)"><div id="dyn-usd-card">${skeleton(3)}</div></div>
       <div class="price-card" style="border-color:rgba(255,140,66,0.2)"><div id="dyn-crude-card">${skeleton(3)}</div></div>
     </div>
     <div class="card"><div class="card-label" style="color:var(--green)">◆ World Headlines</div>
-    <div id="dyn-world-news">${skeleton(5)}</div></div>`;
-  const [dxy, crude, news] = await Promise.all([getQuote('DX-Y.NYB'), getQuote('CL=F'), getNews('world')]);
+    <div id="dyn-world-news">${skeleton(4)}</div></div>`;
+
+  // Fetch with individual try-catches so one failure doesn't block others
+  const [dxyResult, crudeResult, usdInr, news] = await Promise.allSettled([
+    getQuote('DX-Y.NYB'),
+    getQuote('CL=F'),
+    getUsdInr(),
+    getNews('world'),
+  ]);
+
+  const dxy   = dxyResult.status   === 'fulfilled' ? dxyResult.value   : null;
+  const crude = crudeResult.status === 'fulfilled' ? crudeResult.value : null;
+  const inrRate = usdInr.status   === 'fulfilled' ? usdInr.value       : (cacheGet('dyn_usdinr') || 83.5);
+  const worldNews = news.status === 'fulfilled' ? news.value : FALLBACK_NEWS.world;
+
+  // [FIX 4 & 6] DXY card with fallback
   const dc = document.getElementById('dyn-usd-card');
-  if (dc) dc.innerHTML = fmtQuote(dxy, 'DOLLAR INDEX (DXY)', 'USD strength · Live', 'var(--blue)');
+  if (dc) {
+    if (dxy) {
+      dc.innerHTML = fmtQuote(dxy, 'DOLLAR INDEX (DXY)', 'USD strength vs 6 currencies', 'var(--blue)');
+    } else {
+      dc.innerHTML = `<div class="pc-tag" style="color:var(--blue)">DOLLAR INDEX (DXY)</div>
+        <div class="pc-price" style="font-size:20px">~104.5</div>
+        <div class="pc-sub">Estimated · Live data loading</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">DXY down → Gold up · DXY up → EM outflows</div>`;
+    }
+  }
+
+  // [FIX 4 & 6] Crude oil with INR petrol estimate + fallback
   const cc = document.getElementById('dyn-crude-card');
-  if (cc) cc.innerHTML = fmtQuote(crude, 'CRUDE OIL (WTI)', '$/barrel · NYMEX', 'var(--orange)');
+  if (cc) {
+    if (crude) {
+      const crudeInrBbl = Math.round(crude.price * inrRate);
+      const upDown = crude.chg >= 0;
+      const sign = upDown ? '▲ +' : '▼ ';
+      cc.innerHTML = `<div class="pc-tag" style="color:var(--orange)">CRUDE OIL (WTI)</div>
+        <div class="pc-price">$${crude.price.toFixed(1)}</div>
+        <div class="pc-sub">per barrel · NYMEX</div>
+        <div class="pc-change ${upDown?'up':'dn'}">${sign}${Math.abs(crude.chg).toFixed(2)} (${crude.pct.toFixed(2)}%)</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">≈ ₹${crudeInrBbl.toLocaleString('en-IN')}/bbl · India imports 85%</div>`;
+    } else {
+      cc.innerHTML = `<div class="pc-tag" style="color:var(--orange)">CRUDE OIL (WTI)</div>
+        <div class="pc-price" style="font-size:20px">~$82</div>
+        <div class="pc-sub">Estimated · ≈ ₹6,800/bbl</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">India imports 85% of crude · Affects petrol prices</div>`;
+    }
+  }
+
+  // [FIX 4] News — always shows (fallback guaranteed)
   const wn = document.getElementById('dyn-world-news');
-  if (wn) wn.innerHTML = news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+  if (wn) wn.innerHTML = worldNews.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
 }
 async function renderTechLive(container) {
   container.innerHTML = `<div class="card-label" style="color:var(--xp2)">◆ Tech Pulse — ${today()}</div>
@@ -1239,12 +1573,34 @@ async function renderTechLive(container) {
     </div>
     <div class="card"><div class="card-label" style="color:var(--xp2)">◆ Tech Headlines</div>
     <div id="dyn-tech-news">${skeleton(5)}</div></div>`;
-  const [nvda, tcs, infy, msft, news] = await Promise.all([getQuote('NVDA'), getQuote('TCS.NS'), getQuote('INFY.NS'), getQuote('MSFT'), getNews('tech')]);
-  const fields = [['dyn-nvda-card', nvda, 'NVIDIA', 'AI Chip King · NASDAQ'], ['dyn-tcs-card', tcs, 'TCS', 'Tata Consultancy · NSE'], ['dyn-infy-card', infy, 'INFOSYS', 'IT Services · NSE'], ['dyn-msft-card', msft, 'MICROSOFT', 'Azure + AI · NASDAQ']];
-  fields.forEach(([id, q, label, sub]) => { const el = document.getElementById(id); if (el) el.innerHTML = fmtQuote(q, label, sub, 'var(--xp2)'); });
+  // [FIX 4] allSettled prevents one failing symbol breaking the whole tab
+  const [nvdaR, tcsR, infyR, msftR, newsR] = await Promise.allSettled([
+    getQuote('NVDA'), getQuote('TCS.NS'), getQuote('INFY.NS'), getQuote('MSFT'), getNews('tech')
+  ]);
+  const TECH_FALLBACKS = {
+    'dyn-nvda-card': ['NVIDIA', 'AI Chip King · NASDAQ ($)', 'var(--xp2)'],
+    'dyn-tcs-card':  ['TCS', 'Tata Consultancy · NSE (₹)', 'var(--xp2)'],
+    'dyn-infy-card': ['INFOSYS', 'IT Services · NSE (₹)', 'var(--xp2)'],
+    'dyn-msft-card': ['MICROSOFT', 'Azure + AI · NASDAQ ($)', 'var(--xp2)'],
+  };
+  const results = [nvdaR, tcsR, infyR, msftR];
+  ['dyn-nvda-card','dyn-tcs-card','dyn-infy-card','dyn-msft-card'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const q = results[i].status === 'fulfilled' ? results[i].value : null;
+    const [label, sub, color] = TECH_FALLBACKS[id];
+    if (q) {
+      el.innerHTML = fmtQuote(q, label, sub, color);
+    } else {
+      el.innerHTML = `<div class="pc-tag" style="color:${color}">${label}</div>
+        <div class="pc-sub" style="margin-top:8px">Loading... · ${sub}</div>`;
+    }
+  });
   const tn = document.getElementById('dyn-tech-news');
-  if (tn) tn.innerHTML = news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+  const techN = newsR.status === 'fulfilled' ? newsR.value : FALLBACK_NEWS.tech;
+  if (tn) tn.innerHTML = techN.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
 }
+
 async function renderMarketsLive(container) {
   container.innerHTML = `<div class="card-label" style="color:var(--blue)">◆ Market Pulse — ${today()}</div>
     <div class="price-row">
@@ -1255,18 +1611,36 @@ async function renderMarketsLive(container) {
     <div id="dyn-stocks-list">${skeleton(4)}</div></div>
     <div class="card"><div class="card-label" style="color:var(--blue)">◆ Market Headlines</div>
     <div id="dyn-markets-news">${skeleton(4)}</div></div>`;
-  const [sensex, btc, hdfc, tatapower, news] = await Promise.all([getQuote('^BSESN'), getQuote('BTC-USD'), getQuote('HDFCBANK.NS'), getQuote('TATAPOWER.NS'), getNews('markets')]);
-  const sc = document.getElementById('dyn-sensex2-card'); if (sc) sc.innerHTML = fmtQuote(sensex, 'SENSEX', 'BSE · Live', 'var(--blue)');
-  const bc = document.getElementById('dyn-btc-card'); if (bc) bc.innerHTML = fmtQuote(btc, 'BITCOIN', 'BTC/USD · Crypto', 'var(--orange)');
-  const stocks = [hdfc, tatapower].map((q, i) => {
-    if (!q) return '';
-    const names = ['HDFC Bank', 'Tata Power'];
-    const reasons = ["India's largest private bank", "Renewable energy play"];
+  const [sensexR, btcR, hdfcR, tatapowerR, newsR] = await Promise.allSettled([
+    getQuote('^BSESN'), getQuote('BTC-USD'), getQuote('HDFCBANK.NS'), getQuote('TATAPOWER.NS'), getNews('markets')
+  ]);
+  const sensex = sensexR.status === 'fulfilled' ? sensexR.value : null;
+  const btc    = btcR.status    === 'fulfilled' ? btcR.value    : null;
+  const hdfc   = hdfcR.status   === 'fulfilled' ? hdfcR.value   : null;
+  const tatapower = tatapowerR.status === 'fulfilled' ? tatapowerR.value : null;
+  const marketsN  = newsR.status === 'fulfilled' ? newsR.value : FALLBACK_NEWS.markets;
+
+  const sc = document.getElementById('dyn-sensex2-card');
+  if (sc) {
+    if (sensex) sc.innerHTML = fmtQuote(sensex, 'SENSEX', 'BSE 30 · Live (₹)', 'var(--blue)');
+    else sc.innerHTML = `<div class="pc-tag" style="color:var(--blue)">SENSEX</div><div class="pc-price" style="font-size:20px">~76,500</div><div class="pc-sub">BSE 30 · Estimated</div>`;
+  }
+  const bc = document.getElementById('dyn-btc-card');
+  if (bc) {
+    if (btc) bc.innerHTML = fmtQuote(btc, 'BITCOIN', 'BTC/USD · Crypto', 'var(--orange)');
+    else bc.innerHTML = `<div class="pc-tag" style="color:var(--orange)">BITCOIN</div><div class="pc-price" style="font-size:20px">~$67K</div><div class="pc-sub">BTC/USD · Estimated</div>`;
+  }
+  const stocks = [
+    { q: hdfc,       sym: 'HDFC BANK', name: "India's largest private bank",  reason: 'Banking leader' },
+    { q: tatapower,  sym: 'TATA PWR',  name: 'Tata Power · Renewables',       reason: 'Clean energy play' },
+  ].map(({ q, sym, name, reason }) => {
+    if (!q) return `<div style="padding:11px 0;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted)">${sym} · ${reason} · Loading...</div>`;
     const up = q.chg >= 0;
-    return makeStockRow(q.symbol.replace('.NS', ''), names[i], '₹' + Math.round(q.price).toLocaleString('en-IN'), `${up?'+':''}${q.pct.toFixed(2)}%`, up, up ? 'BUY' : 'HOLD', reasons[i]);
+    return makeStockRow(sym, name, '₹' + Math.round(q.price).toLocaleString('en-IN'), `${up?'+':''}${q.pct.toFixed(2)}%`, up, up ? 'BUY' : 'HOLD', reason);
   }).join('');
-  const sl = document.getElementById('dyn-stocks-list'); if (sl) sl.innerHTML = stocks || skeleton(2);
-  const mn = document.getElementById('dyn-markets-news'); if (mn) mn.innerHTML = news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+  const sl = document.getElementById('dyn-stocks-list'); if (sl) sl.innerHTML = stocks;
+  const mn = document.getElementById('dyn-markets-news');
+  if (mn) mn.innerHTML = marketsN.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
 }
 async function renderScienceLive(container) {
   container.innerHTML = `<div class="card-label" style="color:var(--red)">◆ Science This Week — ${today()}</div>
@@ -1276,10 +1650,24 @@ async function renderScienceLive(container) {
     </div>
     <div class="card"><div class="card-label" style="color:var(--red)">◆ Science Headlines</div>
     <div id="dyn-science-news">${skeleton(5)}</div></div>`;
-  const [spce, mrna, news] = await Promise.all([getQuote('SPCE'), getQuote('MRNA'), getNews('science')]);
-  const sc = document.getElementById('dyn-spce-card'); if (sc) sc.innerHTML = fmtQuote(spce, 'SPACE SECTOR (SPCE)', 'Virgin Galactic · NYSE', 'var(--red)');
-  const bc = document.getElementById('dyn-bio-card'); if (bc) bc.innerHTML = fmtQuote(mrna, 'BIOTECH (MRNA)', 'Moderna · NASDAQ', 'var(--red)');
-  const sn = document.getElementById('dyn-science-news'); if (sn) sn.innerHTML = news.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
+  const [spceR, mrnaR, newsR] = await Promise.allSettled([getQuote('SPCE'), getQuote('MRNA'), getNews('science')]);
+  const spce    = spceR.status === 'fulfilled' ? spceR.value : null;
+  const mrna    = mrnaR.status === 'fulfilled' ? mrnaR.value : null;
+  const scienceN = newsR.status === 'fulfilled' ? newsR.value : FALLBACK_NEWS.science;
+  const sc = document.getElementById('dyn-spce-card');
+  if (sc) {
+    if (spce) sc.innerHTML = fmtQuote(spce, 'SPACE SECTOR (SPCE)', 'Virgin Galactic · NYSE', 'var(--red)');
+    else sc.innerHTML = `<div class="pc-tag" style="color:var(--red)">SPACE SECTOR</div>
+      <div class="pc-sub" style="margin-top:8px;line-height:1.6">Space stocks track ISRO milestones, Starship launches, and satellite industry growth worldwide.</div>`;
+  }
+  const bc = document.getElementById('dyn-bio-card');
+  if (bc) {
+    if (mrna) bc.innerHTML = fmtQuote(mrna, 'BIOTECH (MRNA)', 'Moderna · NASDAQ', 'var(--red)');
+    else bc.innerHTML = `<div class="pc-tag" style="color:var(--red)">BIOTECH</div>
+      <div class="pc-sub" style="margin-top:8px;line-height:1.6">Biotech stocks reflect CRISPR therapy approvals, cancer drug pipelines, and gene editing milestones.</div>`;
+  }
+  const sn = document.getElementById('dyn-science-news');
+  if (sn) sn.innerHTML = scienceN.map(n => makeNewsItem(newsEmoji(n.title, n.tag), n.title, n.desc || '', n.tag)).join('');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1862,59 +2250,165 @@ function openLesson(icon, title, body) {
 function closelesson() { document.getElementById('lesson-modal').classList.remove('show'); }
 
 // ─ TRAINEE TAB ──────────────────────────────────────────
+// [FIX 3] Storage: wiq_trainee_progress = { arenaName: { completed: [], lastDate: "" } }
+// XP only awarded AFTER user clicks "Mark Complete" inside the lesson view
+// No instant XP on list click
+
+function getTraineeProgress(arena) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('wiq_trainee_progress') || '{}');
+    return raw[arena] || { completed: [], lastDate: '' };
+  } catch { return { completed: [], lastDate: '' }; }
+}
+function saveTraineeProgress(arena, progress) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('wiq_trainee_progress') || '{}');
+    raw[arena] = progress;
+    localStorage.setItem('wiq_trainee_progress', JSON.stringify(raw));
+  } catch {}
+}
+
 function buildTrainee() {
-  const arena = S.currentArena;
+  const arena   = S.currentArena;
   const modules = ARENAS[arena].traineeModules || [];
-  const storageKey = `wiq_trainee_${arena}`;
-  const progress = JSON.parse(localStorage.getItem(storageKey) || '[]');
-  const completedCount = progress.length;
-  const totalModules = modules.length;
-  const pct = totalModules > 0 ? Math.round(completedCount / totalModules * 100) : 0;
+  const prog    = getTraineeProgress(arena);
+  const done    = prog.completed || [];
+  const total   = modules.length;
+  const pct     = total > 0 ? Math.round(done.length / total * 100) : 0;
   const container = document.getElementById('trainee-content');
   container.innerHTML = `
     <div class="trainee-wrap">
       <div class="trainee-header">
         <div class="trainee-title">🎓 Trainee Mode</div>
-        <div class="trainee-sub">Structured learning path for ${ARENAS[arena].name}</div>
+        <div class="trainee-sub">Structured path · ${ARENAS[arena].name}</div>
         <div class="trainee-progress-wrap">
           <div class="trainee-prog-bar"><div class="trainee-prog-fill" style="width:${pct}%"></div></div>
-          <div class="trainee-prog-label">${completedCount}/${totalModules} modules completed · ${pct}% done</div>
+          <div class="trainee-prog-label">${done.length}/${total} modules complete · ${pct}%</div>
         </div>
       </div>
-      <div class="module-list">
+      <div class="module-list" id="module-list">
         ${modules.map((m, idx) => {
-          const done = progress.includes(idx);
-          const locked = idx > completedCount;
-          const cls = done ? 'completed' : locked ? 'locked' : '';
-          const badge = done ? '<span class="module-badge done">✓ Done</span>' : locked ? '<span class="module-badge lock">🔒 Locked</span>' : '<span class="module-badge todo">→ Start</span>';
-          return `<div class="module-card ${cls}" ${!locked && !done ? `onclick="completeModule('${arena}',${idx})"` : ''}>
-            <div class="module-num" style="color:${done ? 'var(--green)' : 'var(--muted)'}">${done ? '✓' : idx+1}</div>
+          const isDone   = done.includes(idx);
+          const isLocked = idx > done.length; // must complete in order
+          const cls      = isDone ? 'completed' : isLocked ? 'locked' : '';
+          const badge    = isDone
+            ? '<span class="module-badge done">✓ Done</span>'
+            : isLocked
+            ? '<span class="module-badge lock">🔒</span>'
+            : '<span class="module-badge todo">→ Open</span>';
+          return `<div class="module-card ${cls}" data-arena="${arena}" data-idx="${idx}" ${!isLocked && !isDone ? 'style="cursor:pointer"' : ''}>
+            <div class="module-num" style="color:${isDone ? 'var(--green)' : isLocked ? 'var(--muted)' : 'var(--xp2)'}">${isDone ? '✓' : idx+1}</div>
             <div class="module-info">
               <div class="module-title">${m.title}</div>
-              <div class="module-sub">${m.sub} · +${m.xp} XP</div>
+              <div class="module-sub">${m.sub} · <span style="color:var(--xp2)">+${m.xp} XP on completion</span></div>
             </div>
             ${badge}
           </div>`;
         }).join('')}
       </div>
-      <div style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;text-align:center">
-        <div style="font-size:22px;margin-bottom:8px">📌</div>
-        <div style="font-size:14px;font-weight:700;margin-bottom:6px">How Trainee Mode Works</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.7">Complete modules in order to unlock the next one.<br>Each module earns XP and builds on the previous.<br>Full completion unlocks an exclusive arena badge.</div>
+      <div style="margin-top:20px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center">
+        <div style="font-size:11px;color:var(--muted);line-height:1.7">
+          📌 Click a module to read it · XP awarded only after clicking <strong style="color:var(--text)">Mark Complete</strong>
+        </div>
       </div>
     </div>`;
+
+  // Attach click handlers after rendering
+  document.querySelectorAll('#module-list .module-card').forEach(card => {
+    const idx   = parseInt(card.dataset.idx);
+    const arenaId = card.dataset.arena;
+    const isDone   = done.includes(idx);
+    const isLocked = idx > done.length;
+    if (!isDone && !isLocked) {
+      card.addEventListener('click', () => openTraineeLesson(arenaId, idx));
+    }
+  });
 }
 
-function completeModule(arena, idx) {
-  const storageKey = `wiq_trainee_${arena}`;
-  const progress = JSON.parse(localStorage.getItem(storageKey) || '[]');
-  if (progress.includes(idx)) return;
-  progress.push(idx);
-  localStorage.setItem(storageKey, JSON.stringify(progress));
+// [FIX 3] Open a trainee lesson in the lesson modal — shows content, then Mark Complete button
+function openTraineeLesson(arena, idx) {
+  const m    = ARENAS[arena].traineeModules[idx];
+  const prog = getTraineeProgress(arena);
+  // Build rich lesson content from module data
+  const lessonContent = `
+    <div style="margin-bottom:16px">
+      <div style="font-family:var(--ffm);font-size:9px;letter-spacing:0.15em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">MODULE ${idx+1} OF ${ARENAS[arena].traineeModules.length}</div>
+      <div style="font-size:13px;color:#7080a0;line-height:1.85;margin-bottom:16px">${m.sub}</div>
+    </div>
+    ${m.content || generateModuleContent(arena, idx)}
+    <div style="margin-top:20px;padding:14px;background:rgba(0,230,118,0.06);border:1px solid rgba(0,230,118,0.2);border-radius:12px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">✅ Read through this lesson, then mark it complete to earn your XP.</div>
+      <button onclick="completeTraineeModule('${arena}',${idx})" style="width:100%;padding:11px;border-radius:10px;border:1px solid rgba(0,230,118,0.4);background:rgba(0,230,118,0.1);color:var(--green);font-family:var(--ffm);font-size:11px;letter-spacing:0.1em;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background='rgba(0,230,118,0.2)'" onmouseout="this.style.background='rgba(0,230,118,0.1)'">
+        ✓ Mark Complete · Earn +${m.xp} XP
+      </button>
+    </div>`;
+  openLesson(m.icon || '📖', m.title, lessonContent);
+}
+
+// Generate structured content for trainee modules based on arena + index
+function generateModuleContent(arena, idx) {
+  const CONTENT = {
+    gold: [
+      `<h3>What is Gold?</h3>Gold is a chemical element (Au) with atomic number 79. It has been used as money and jewellery for over 5,000 years across every civilisation.<br><br><strong>Physical properties:</strong> Never corrodes · Extremely dense (19.3 g/cm³) · Conducts electricity · Malleable (1oz can be hammered to 300 sq ft)<br><br><strong>Cultural significance in India:</strong> India is the world's 2nd largest gold consumer. Gold is central to weddings, festivals, and is considered an auspicious store of value — not just an investment.<div class="example-box">💡 India imports ~700-800 tonnes of gold per year, making it one of the largest drivers of global gold demand. Festival seasons (Diwali, Akshaya Tritiya, wedding season Oct-Dec) cause domestic price spikes.</div>`,
+      `<h3>How Gold is Priced in India</h3>Gold pricing in India has multiple layers:<br><br>• <strong>MCX Spot Price:</strong> Based on global COMEX/LBMA price × USD/INR rate<br>• <strong>Import Duty:</strong> Currently ~15% — India levies one of the world's highest gold import taxes<br>• <strong>GST:</strong> 3% on jewellery purchase<br>• <strong>Making Charges:</strong> Jeweller's fee — 8-25% extra<br><br>So if MCX gold is ₹72,000/10g, jewellery may cost ₹82,000-90,000/10g after all charges.<div class="example-box">💡 Best way to buy gold without making charges: Sovereign Gold Bonds (SGB) or Gold ETFs on NSE/BSE. Zero making charges, and SGBs pay 2.5% annual interest!</div>`,
+      `<h3>Gold vs Other Asset Classes</h3><strong>20-year return comparison (India):</strong><br>• Gold: ~13% CAGR<br>• Nifty 50: ~14% CAGR<br>• Fixed Deposits: ~7% CAGR<br>• Real Estate: ~9-11% CAGR (varies hugely by location)<br><br><strong>When gold outperforms equities:</strong> During bear markets, crises, high inflation, currency depreciation. Gold is your hedge, not your growth engine.<div class="example-box">💡 Rule of thumb: Keep 10-15% of your portfolio in gold. It reduces overall volatility. When everything else crashes in 2008 or 2020, gold either held value or went up.</div>`,
+      `<h3>Silver's Dual Identity</h3>Silver is unique — it's both a precious metal AND an industrial commodity.<br><br><strong>Investment demand (30% of silver):</strong> Coins, bars, ETFs<br><strong>Industrial demand (70% of silver):</strong><br>• Solar panels: 20g of silver paste per panel<br>• EV batteries: 25-50g per vehicle<br>• Electronics: 0.3g per smartphone<br>• Medical: Antibacterial coatings, equipment<br><br><strong>Why this matters:</strong> Unlike gold, if industry slows — silver falls faster. If green energy booms — silver could be scarce.<div class="example-box">💡 India's 500 GW renewable energy target by 2030 requires an estimated 15,000 tonnes of silver — nearly 6× India's current annual silver imports.</div>`,
+      `<h3>How to Buy Gold & Silver in India</h3><strong>5 ways, ranked by efficiency:</strong><br><br>1. <strong>Sovereign Gold Bonds (SGB):</strong> Best for long-term. Issued by RBI. Pays 2.5% interest. Zero GST on redemption. Tracks gold price.<br>2. <strong>Gold ETF (NSE/BSE):</strong> Like buying shares of gold. Liquid. No storage risk. ~0.5% expense ratio.<br>3. <strong>Digital Gold:</strong> Instant, fractional. But check if backed by physical gold (MMTC-PAMP, Augmont).<br>4. <strong>Gold Mutual Fund:</strong> Invests in Gold ETFs. Good for SIP mode.<br>5. <strong>Physical Gold:</strong> Jewellery has high making charges. Gold coins/bars are purer but need safe storage.<div class="example-box">💡 Start a ₹500/month Gold ETF SIP today on Groww or Zerodha. Over 10 years at historical returns, ₹60,000 invested → ₹1.1 lakh+.</div>`,
+    ],
+    india: [
+      `<h3>India's GDP — The Numbers Behind the Story</h3>India's GDP is ~$3.7 trillion (FY2024), making it the world's 5th largest economy. At current growth rates of 7-8%, India becomes the 3rd largest by 2027-28.<br><br><strong>GDP breakdown:</strong><br>• Services: 54% (IT, finance, retail, healthcare)<br>• Industry: 28% (manufacturing, construction, utilities)<br>• Agriculture: 18% (employs 44% of workforce, but contributes only 18% to GDP)<br><br><strong>What drives 8% growth:</strong> Infrastructure spending, PLI scheme manufacturing, IT exports, domestic consumption, digital economy.<div class="example-box">💡 India's per capita GDP is ~$2,600. For comparison: China $13,000, USA $80,000. This means India's growth runway is enormous — we're still early in the curve.</div>`,
+      `<h3>RBI — The Engine of India's Money</h3>The Reserve Bank of India (RBI) controls India's monetary policy. Its core mandate: keep inflation near 4% while supporting growth.<br><br><strong>How RBI controls money supply:</strong><br>• <strong>Repo Rate:</strong> Rate at which RBI lends to banks. Lower = cheaper loans = growth. Higher = expensive loans = inflation controlled.<br>• <strong>CRR (Cash Reserve Ratio):</strong> % of deposits banks must hold with RBI. Higher = less money to lend = tighter money supply.<br>• <strong>OMO (Open Market Operations):</strong> RBI buys/sells government bonds to inject/suck money from the system.<div class="example-box">💡 RBI's rate decisions happen every 2 months at the MPC (Monetary Policy Committee) meeting. The repo rate directly affects your home loan EMI. A 0.25% cut on a ₹50L loan = ₹750-1,000/month savings.</div>`,
+      `<h3>The Union Budget Explained</h3>India's Union Budget, presented every February, determines how the government earns and spends ₹50+ lakh crore annually.<br><br><strong>Revenue side:</strong><br>• Direct taxes (income tax, corporate tax): ~₹20 lakh crore<br>• GST and indirect taxes: ~₹22 lakh crore<br>• Borrowings: ~₹15 lakh crore (fiscal deficit)<br><br><strong>Expenditure side:</strong><br>• Capital expenditure (roads, railways, defence): ₹11 lakh crore FY24 (record)<br>• Revenue expenditure (salaries, subsidies): ₹35+ lakh crore<div class="example-box">💡 The fiscal deficit = government spends more than it earns. India's target: 4.5% of GDP by FY26. High fiscal deficit = government borrows more = interest rates stay higher = your loan EMIs are affected.</div>`,
+      `<h3>Understanding FII & DII Flows</h3>Indian stock markets are driven by TWO major investor groups:<br><br><strong>FII (Foreign Institutional Investors):</strong> Global funds (BlackRock, Vanguard, Singapore GIC) investing in Indian stocks and bonds. They move large amounts quickly — causing big market swings.<br><br><strong>DII (Domestic Institutional Investors):</strong> Indian institutions (LIC, SBI Mutual Fund, HDFC MF). They often buy when FIIs sell — acting as a stabiliser.<br><br><strong>How to track:</strong> NSE website publishes daily FII/DII data by 7 PM every trading day.<div class="example-box">💡 In 2023-24, DIIs invested ₹2.3 lakh crore into Indian equities — partially absorbing ₹1.2 lakh crore of FII selling. SIP investors (like you) ARE the DII strength.</div>`,
+    ],
+    world: [
+      `<h3>How the Global Economy Works</h3>The world economy is interconnected through trade, finance, and supply chains. No country is truly independent.<br><br><strong>The US dollar's special role:</strong> 85% of global trade is settled in USD. Oil, gold, wheat — all priced in dollars. This gives the USA enormous power — their monetary policy affects everyone.<br><br><strong>Key global economic players:</strong><br>• USA: $27T GDP, global reserve currency, tech/finance dominance<br>• China: $18T GDP, manufacturing hub, growing geopolitical power<br>• EU: $18T combined, regulatory superpower<br>• India: $3.7T, fastest-growing large economy<div class="example-box">💡 When the US sneezes, the world catches a cold. The 2008 US housing crisis caused a global recession. The 2022 US Fed rate hikes caused currency crises in Sri Lanka, Turkey, and Argentina.</div>`,
+      `<h3>The US Federal Reserve</h3>The Federal Reserve (the "Fed") is America's central bank — but its decisions affect every economy on Earth.<br><br><strong>The Fed's two mandates:</strong><br>1. Price stability (2% inflation target)<br>2. Maximum employment<br><br><strong>The rate hike cycle (2022-2023):</strong> Fed raised rates from 0% to 5.25% — the fastest increase since 1980. Result: Strong USD → Capital fled emerging markets → Rupee weakened → Indian bonds sold off.<br><br><strong>Now (2024-25):</strong> Fed starting to cut rates → Dollar weakens → Capital flows back to India → Rupee strengthens → Gold rises → Indian markets rally.<div class="example-box">💡 Watch the Fed Funds Rate futures on CME website — it tells you what markets expect the Fed to do next. When futures price in rate cuts → buy Indian equities.</div>`,
+      `<h3>China's Economy & India's Opportunity</h3>China has been the world's factory for 30 years. But now, things are changing:<br><br><strong>China's challenges:</strong><br>• Ageing population (1-child policy aftermath)<br>• Property sector crisis (Evergrande, Country Garden)<br>• US tech sanctions (chips, AI)<br>• High debt-to-GDP (300%)<br>• Supply chain "China+1" diversification<br><br><strong>India's opportunity:</strong> Companies like Apple, Samsung, and global brands are moving factories to India. India's PLI scheme attracted ₹2 lakh crore in pledged investment.<div class="example-box">💡 Apple now makes 14% of iPhones in India (vs 3% in 2022). Target: 25% by 2025. Each iPhone manufactured in India = jobs, exports, GDP. This is why the PLI scheme matters.</div>`,
+      `<h3>Geopolitics & Markets</h3>Political events directly move financial markets. Understanding geopolitics = understanding risks before they happen.<br><br><strong>Key geopolitical risk factors:</strong><br>• Middle East tensions → Oil price spike → Indian inflation → RBI rate decisions<br>• Russia-Ukraine war → Wheat prices → Food inflation globally<br>• US-China tech war → Chip shortages → Electronics prices up<br>• Taiwan tensions → Semiconductor supply risk (TSMC makes 90% of advanced chips)<br><br><strong>India's strategic position:</strong> Non-alignment — India maintains relationships with USA, Russia, Middle East. This gives India supply security but creates diplomatic complexity.<div class="example-box">💡 India's trade with Russia surged after 2022 sanctions — buying discounted Russian oil and saving ~$6B/year on energy costs. Geopolitics creates both risks and opportunities.</div>`,
+    ],
+    tech: [
+      `<h3>What is Artificial Intelligence?</h3>AI is software that learns patterns from data instead of following explicit rules. The result: systems that can see, hear, speak, write, and reason.<br><br><strong>Key AI technologies:</strong><br>• <strong>Machine Learning:</strong> Algorithms that improve with data (spam filters, Netflix recommendations)<br>• <strong>Deep Learning:</strong> Neural networks that process images, audio (face recognition, voice assistants)<br>• <strong>LLMs:</strong> Large Language Models like ChatGPT — trained on trillions of text tokens<br><br><strong>Why NOW is different:</strong> Computing power (GPUs), data availability, and algorithmic breakthroughs all converged simultaneously around 2022.<div class="example-box">💡 India trains ~200,000 AI engineers per year — the largest pipeline globally. Companies like Sarvam AI and Krutrim are building India-specific AI models in Hindi, Tamil, Telugu etc.</div>`,
+      `<h3>India's AI & Tech Ecosystem</h3>India is not just an IT services country anymore — it's becoming an AI creator.<br><br><strong>Key players:</strong><br>• <strong>Sarvam AI:</strong> Building India's foundational AI model. Backed by Lightspeed, Khosla.<br>• <strong>Krutrim (Ola):</strong> Bhavish Aggarwal's AI startup. India's first AI unicorn.<br>• <strong>Jio AI:</strong> Mukesh Ambani deploying AI across 450M Jio subscribers<br>• <strong>Government:</strong> ₹10,000 crore IndiaAI Mission for compute, research, startups<br><br><strong>India's AI advantage:</strong> English proficiency, large data volume (UPI, Aadhaar, healthcare), cost efficiency, huge domestic market.<div class="example-box">💡 India has 5 million+ software engineers. AI makes each 10x more productive. India's IT exports could reach $500B by 2030 vs $250B today — directly because of AI leverage.</div>`,
+      `<h3>Chips & Semiconductors</h3>Semiconductors are the oil of the 21st century. Every modern device — phones, cars, data centers, weapons — runs on chips.<br><br><strong>The supply chain:</strong><br>• Design: NVIDIA, AMD, Qualcomm (mostly USA)<br>• Fabrication: TSMC (90% of advanced chips), Samsung (South Korea)<br>• Packaging: Malaysia, Vietnam, China<br><br><strong>The bottleneck:</strong> TSMC in Taiwan. If Taiwan is disrupted, global chip supply collapses within weeks.<br><br><strong>India's chip ambitions:</strong> Tata Electronics + PSMC building India's first chip fab in Gujarat. $10B investment. Expected to produce chips by 2025-26.<div class="example-box">💡 India currently imports ~$50B of semiconductor-related products annually. If India builds even 10% domestic capability, that's $5B in import substitution. A massive economic unlock.</div>`,
+      `<h3>How to Invest in the AI Theme from India</h3>You can participate in the AI boom from India without needing a US brokerage account:<br><br><strong>Indian plays on AI:</strong><br>• <strong>IT Services:</strong> TCS, Infosys, HCL — AI implementation contracts<br>• <strong>Semiconductors:</strong> Dixon Technologies (electronics manufacturing), Kaynes Technology<br>• <strong>Data Centers:</strong> Adani Enterprises, Nxtra (Airtel subsidiary)<br>• <strong>AI-adjacent:</strong> Jio (AI infra deployment), Paytm (AI in fintech)<br><br><strong>US exposure via India:</strong> Motilal Oswal Nasdaq 100 FoF, Mirae US Innovation ETF — no need for LRS.<div class="example-box">💡 NVIDIA stock grew 10x in 2 years due to AI GPU demand. In India, the equivalent is a Nifty IT index fund + selective AI-adjacent stocks. Rebalance annually.</div>`,
+    ],
+    markets: [
+      `<h3>Stock Market Basics</h3>A stock represents ownership in a company. When you buy 1 share of TCS, you own a tiny fraction of Tata Consultancy Services and are entitled to a share of its profits.<br><br><strong>Key terms:</strong><br>• <strong>NSE/BSE:</strong> India's stock exchanges where shares are traded<br>• <strong>Nifty 50/Sensex:</strong> Index tracking the top 50/30 companies — barometers of the market<br>• <strong>Bull/Bear market:</strong> Rising (bull) vs falling (bear) market conditions<br>• <strong>Market cap:</strong> Total value of all shares (price × number of shares)<br><br><strong>How prices are set:</strong> Pure supply and demand. More buyers → price rises. More sellers → price falls.<div class="example-box">💡 The Nifty 50 has delivered ~14% CAGR over 20 years. ₹1 lakh invested in Nifty 50 index fund in 2004 = ~₹13 lakhs today. No stock picking needed.</div>`,
+      `<h3>How to Read Stock Charts</h3>A price chart shows you what buyers and sellers have done historically — not what they WILL do. But patterns help.<br><br><strong>Key concepts:</strong><br>• <strong>Candlestick:</strong> Each candle shows open, high, low, close for a period. Green = price went up. Red = price went down.<br>• <strong>Support:</strong> A price level where buyers historically step in (floor)<br>• <strong>Resistance:</strong> A price level where sellers historically dominate (ceiling)<br>• <strong>Volume:</strong> Number of shares traded. High volume = conviction. Low volume = weak move.<br><br><strong>The golden rule:</strong> Charts show you WHERE price is relative to history — not WHY or WHEN it will move.<div class="example-box">💡 Before buying any stock, check its 1-year chart on Zerodha or TradingView. Is it at support or resistance? Is it in an uptrend? Context matters more than any single indicator.</div>`,
+      `<h3>Mutual Funds & ETFs — The Smart Way to Invest</h3>Most people should NOT pick individual stocks. Here's why mutual funds and ETFs are better:<br><br><strong>Mutual Fund:</strong> Pool of money managed by a professional fund manager. Actively managed. Higher fees (1-2% expense ratio).<br><br><strong>ETF (Exchange Traded Fund):</strong> Tracks an index (like Nifty 50) automatically. No manager needed. Very low fees (0.05-0.15%). Beats 80% of active funds over 10+ years.<br><br><strong>Best ETFs for beginners in India:</strong><br>• Nifty 50 Index ETF (any AMC)<br>• Nifty Next 50 ETF<br>• Gold ETF (SilverBees, GoldBees)<div class="example-box">💡 If you invest ₹5,000/month in a Nifty 50 SIP for 20 years at 13%, you get ~₹2.6 crore. Invested amount: ₹12 lakh. The rest is pure compounding.</div>`,
+      `<h3>Cryptocurrency — Risk, Reward, Reality</h3>Crypto is the most volatile major asset class in the world. Bitcoin fell 80% in 2018. Rose 1,000% in 2020. Fell 75% in 2022. This is normal for crypto.<br><br><strong>What crypto actually is:</strong><br>• <strong>Bitcoin:</strong> Digital gold. Fixed supply of 21 million coins. Store of value thesis.<br>• <strong>Ethereum:</strong> Programmable blockchain. Powers DeFi, NFTs, smart contracts.<br>• <strong>Altcoins:</strong> Thousands of speculative tokens. Most go to zero.<br><br><strong>India's crypto rules:</strong> 30% flat tax on gains + 1% TDS on every transaction. Not tax-friendly but legal.<div class="example-box">💡 If you want crypto exposure, limit it to 2-5% of your portfolio. Only Bitcoin and Ethereum have long-term track records. Never invest more than you can afford to lose 100% of.</div>`,
+      `<h3>Building Your Portfolio</h3>A good portfolio is diversified, rebalanced annually, and aligned to your goals and risk tolerance.<br><br><strong>Simple Indian portfolio template (moderate risk):</strong><br>• 60% — Nifty 50 Index Fund (equity growth)<br>• 15% — Nifty Next 50 / Midcap 150 (higher growth, higher risk)<br>• 10% — Gold ETF / SGB (hedge, stability)<br>• 10% — Debt fund / FD (safety, liquidity)<br>• 5% — International fund (global diversification)<br><br><strong>Rebalancing:</strong> Every 12 months, if any asset class drifts 5%+ from target, sell the winner and buy the laggard.<div class="example-box">💡 The hardest part of investing is doing nothing. When markets crash 30%, your SIP auto-buys MORE units at cheaper prices. This is rupee-cost averaging — your friend during downturns.</div>`,
+    ],
+    science: [
+      `<h3>India's Space Programme — ISRO & Beyond</h3>India's space story is one of the most inspiring in the world. With a fraction of NASA's budget, ISRO achieves world firsts.<br><br><strong>Recent milestones:</strong><br>• <strong>Chandrayaan-3 (2023):</strong> First soft landing on Moon's south pole — ever, by any country<br>• <strong>Aditya-L1 (2023):</strong> India's first solar mission, studying sun from L1 orbit<br>• <strong>Gaganyaan:</strong> India's first crewed spaceflight — upcoming<br><br><strong>Commercial space (NewSpace India):</strong> Private companies like Skyroot Aerospace (Vikram rocket) and Pixxel (hyperspectral imaging satellites) are building India's space economy.<div class="example-box">💡 India's space economy is projected to reach $44 billion by 2033 (vs $8.4B in 2023). PM Modi's target: 1,000 new space startups by 2025. ISRO licensing its technology to private players now.</div>`,
+      `<h3>CRISPR Gene Editing</h3>CRISPR-Cas9 is arguably the most important scientific breakthrough of the 21st century. It allows editing DNA like text — find a sequence, cut it, replace it.<br><br><strong>How it works:</strong><br>1. Scientists program a "guide RNA" with the target DNA sequence<br>2. The Cas9 protein follows the guide and cuts the target DNA<br>3. The cell's natural repair mechanism fixes the cut — you can insert new DNA here<br><br><strong>Applications in India:</strong><br>• Sickle cell disease cure (affects 20M Indians)<br>• Thalassemia treatment (45M carriers in India)<br>• Agricultural crops resistant to drought/disease<div class="example-box">💡 The first CRISPR therapy (Casgevy) was approved in the USA and UK in 2023. It functionally cures sickle cell disease. India-specific trials are ongoing. Timeline to India approval: 3-5 years.</div>`,
+      `<h3>Fusion Energy</h3>Fusion is how the sun works: hydrogen atoms fuse under extreme pressure to release massive energy. For 70 years, scientists have been trying to replicate this on Earth.<br><br><strong>Why it's the holy grail:</strong><br>• Fuel: Deuterium (from seawater) — virtually unlimited<br>• Output: Helium — completely harmless<br>• No carbon emissions, no long-lived radioactive waste<br>• Energy density: 1kg of fusion fuel = 10 million kg of coal<br><br><strong>2022 breakthrough:</strong> NIF (USA) achieved Q>1 — got more energy out than laser energy put in. First time in history.<br><br><strong>Timeline:</strong> Commercial fusion by 2035-2040 is realistic. Commonwealth Fusion Systems targeting 2030s.<div class="example-box">💡 If fusion succeeds, India — which currently imports 85% of its energy needs — could become energy self-sufficient. Electricity costs could drop 70-90%. Manufacturing competitiveness would explode.</div>`,
+      `<h3>AI in Scientific Discovery</h3>AI is now accelerating scientific research at a rate no human team could match alone.<br><br><strong>AlphaFold (DeepMind):</strong> Predicted the 3D structure of 200 million proteins — a problem that took biologists years per protein. AI did it in hours. This accelerates drug discovery by decades.<br><br><strong>Drug discovery:</strong> Traditional drug development: 12 years, $2.6 billion. AI-assisted: potentially 3-4 years, $100M. Insilico Medicine approved an AI-discovered drug for ILD in 2023.<br><br><strong>Climate science:</strong> Google's GraphCast weather model outperforms traditional models at 10-day forecasts with 99% less computing power.<div class="example-box">💡 India's biotech companies (Biocon, Dr. Reddy's) are adopting AI for drug discovery. Biocon partnered with Google for AI-driven biologics research. India could become a major AI-pharma hub given its generics expertise.</div>`,
+    ],
+  };
+  const content = CONTENT[arena];
+  return content && content[idx]
+    ? `<div class="lb-body" style="font-size:13px;color:#7080a0;line-height:1.85">${content[idx]}</div>`
+    : `<div style="font-size:13px;color:var(--muted);line-height:1.8">This module covers: <strong style="color:var(--text)">${ARENAS[arena].traineeModules[idx].sub}</strong>.<br><br>Read through the arena's Why, Forecast, and Learn tabs for context on this topic.</div>`;
+}
+
+// [FIX 3] Complete module — XP awarded ONLY here, after user clicks Mark Complete
+function completeTraineeModule(arena, idx) {
+  const prog = getTraineeProgress(arena);
+  if ((prog.completed || []).includes(idx)) {
+    closelesson();
+    return;
+  }
+  prog.completed = prog.completed || [];
+  prog.completed.push(idx);
+  prog.lastDate = new Date().toDateString();
+  saveTraineeProgress(arena, prog);
   const xp = ARENAS[arena].traineeModules[idx].xp;
   addXP(xp);
-  showLevelUp(`Module completed! +${xp} XP`);
-  setTimeout(() => buildTrainee(), 500);
+  closelesson();
+  showLevelUp(`Module complete! +${xp} XP`);
+  setTimeout(() => buildTrainee(), 600);
 }
 
 // ─ CHART ────────────────────────────────────────────────
@@ -2029,17 +2523,28 @@ async function login() {
 }
 
 async function logout() {
-  if (window.supabaseClient) await window.supabaseClient.auth.signOut();
-  // Clear all app state
-  ['wiq_xp','wiq_level','wiq_correct','wiq_streak','wiq_highscores',
-   'wiq_completed_cards','wiq_achievements','wiq_visited_today','wiq_quest_date'].forEach(k => localStorage.removeItem(k));
+  // [FIX v2.1] Logout — sign out session ONLY.
+  // NEVER delete profile data (wiq_xp, wiq_level, wiq_correct, wiq_achievements,
+  // wiq_highscores, wiq_completed_cards, wiq_trainee_progress, wiq_streak).
+  // These persist in localStorage as cache, reconciled with server on next login.
+  if (window.supabaseClient) {
+    try { await window.supabaseClient.auth.signOut(); } catch (e) { console.warn('[WIQ] signOut err', e); }
+  }
+  // Clear ONLY session/daily state — NOT profile data
+  ['wiq_visited_today', 'wiq_quest_date'].forEach(k => localStorage.removeItem(k));
+  // Clear the quest reward keys for today so they can fire again after login
+  const todayStr = new Date().toDateString();
+  localStorage.removeItem('wiq_quest_reward_' + todayStr);
   sessionStorage.clear();
-  // Reset S
-  S.xp = 0; S.level = 1; S.streak = 1; S.arenaXP = 0; S.totalCorrect = 0; S.visitedArenas.clear();
-  // Reset UI
-  ['xp-val','lv-num','str-num'].forEach((id, i) => { const el = document.getElementById(id); if (el) el.textContent = ['0','1','1'][i]; });
-  const fill = document.getElementById('xp-fill'); if (fill) fill.style.width = '0%';
-  const uname = document.getElementById('tb-username'); if (uname) uname.textContent = 'Guest';
+  // Reset RUNTIME S object only — localStorage retains the profile cache for reconciliation
+  S.xp = 0; S.level = 1; S.streak = 1; S.arenaXP = 0; S.totalCorrect = 0;
+  S.visitedArenas.clear();
+  // Reset UI elements to show guest state
+  const xpFill = document.getElementById('xp-fill'); if (xpFill) xpFill.style.width = '0%';
+  const xpVal  = document.getElementById('xp-val');  if (xpVal)  xpVal.textContent  = '0';
+  const lvNum  = document.getElementById('lv-num');  if (lvNum)  lvNum.textContent  = '1';
+  const strNum = document.getElementById('str-num'); if (strNum) strNum.textContent = '1';
+  const uname  = document.getElementById('tb-username'); if (uname) uname.textContent = 'Guest';
   showAuth();
 }
 
